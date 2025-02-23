@@ -41,7 +41,6 @@ def main():
         bot_avatar = input("Enter the bot avatar URL (e.g., a link to a PNG image): ")
         save_user_info(country_code, language, webhook_url, bot_name, bot_avatar)
     else:
-        # Use saved user info
         country_code = user_info["country_code"]
         language = user_info["language"]
         webhook_url = user_info["webhook_url"]
