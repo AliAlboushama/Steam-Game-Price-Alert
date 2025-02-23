@@ -1,11 +1,12 @@
 import time
 import requests
-import json
+from saved_info import load_user_info, save_user_info
+from saved_games import initialize_database, add_game, get_all_games, get_game_link
+from discord import send_discord_notification
 
 def extract_app_id(game_link):
     """Extract the APP_ID from the Steam game link."""
     try:
-        # Extract the APP_ID from the URL
         app_id = game_link.split('/app/')[1].split('/')[0]
         return app_id
     except Exception as e:
@@ -25,44 +26,48 @@ def get_game_details(app_id, country_code, language):
         print(f"[ERROR] Error fetching game details: {e}")
         return None
 
-def send_discord_notification(game_name, current_price, discount_percent, image_url, webhook_url, bot_name, bot_avatar):
-    """Send a Discord notification about the sale."""
-    embed = {
-        "title": game_name,
-        "description": f"On sale: ${current_price:.2f} USD ({discount_percent}% off)",
-        "url": f"https://store.steampowered.com/app/{app_id}/",
-        "color": 16711680,  # Red color
-        "image": {"url": image_url}  # Include the game image
-    }
-    payload = {
-        "username": bot_name,
-        "avatar_url": bot_avatar,  # Set the bot's avatar
-        "embeds": [embed]
-    }
-    
-    try:
-        print("Sending Discord notification...")
-        response = requests.post(webhook_url, json=payload)
-        response.raise_for_status()
-        print("Notification sent successfully.")
-    except Exception as e:
-        print(f"[ERROR] Error sending Discord notification: {e}")
-
 def main():
     """Main loop to check for price changes every hour."""
-    global last_known_price
+    initialize_database()
 
-    # User inputs
-    game_link = input("Enter the Steam game link (e.g., https://store.steampowered.com/app/534380/): ")
-    app_id = extract_app_id(game_link)
-    if not app_id:
-        return
+    # Load saved user info
+    user_info = load_user_info()
+    if not user_info:
+        # Prompt for user info if not saved
+        country_code = input("Enter the country code (e.g., US, UK): ").upper()
+        language = input("Enter the language code (e.g., en for English): ").lower()
+        webhook_url = input("Enter your Discord webhook URL: ")
+        bot_name = input("Enter the bot name: ")
+        bot_avatar = input("Enter the bot avatar URL (e.g., a link to a PNG image): ")
+        save_user_info(country_code, language, webhook_url, bot_name, bot_avatar)
+    else:
+        country_code = user_info["country_code"]
+        language = user_info["language"]
+        webhook_url = user_info["webhook_url"]
+        bot_name = user_info["bot_name"]
+        bot_avatar = user_info["bot_avatar"]
 
-    country_code = input("Enter the country code (e.g., US, UK): ").upper()
-    language = input("Enter the language code (e.g., en for English): ").lower()
-    webhook_url = input("Enter your Discord webhook URL: ")
-    bot_name = input("Enter the bot name: ")
-    bot_avatar = input("Enter the bot avatar URL (e.g., a link to a PNG image): ")
+    # List saved games
+    games = get_all_games()
+    if games:
+        print("Saved games:")
+        for game_id, game_name in games:
+            print(f"{game_id}. {game_name}")
+        choice = input("Enter the number of the game to scan, or type 'add' to add a new game: ")
+    else:
+        choice = "add"
+
+    if choice.lower() == "add":
+        # Add a new game
+        game_link = input("Enter the Steam game link (e.g., https://store.steampowered.com/app/534380/): ")
+        game_name = input("Enter the game name: ")
+        add_game(game_name, game_link)
+        app_id = extract_app_id(game_link)
+    else:
+        # Use an existing game
+        game_id = int(choice)
+        game_link = get_game_link(game_id)
+        app_id = extract_app_id(game_link)
 
     last_known_price = None
 
@@ -82,6 +87,7 @@ def main():
             if discount_percent > 0:
                 print(f"Sale detected! Last known price: {last_known_price}")
                 if current_price != last_known_price:
+                    # Use the Discord module to send the notification
                     send_discord_notification(game_name, current_price, discount_percent, image_url, webhook_url, bot_name, bot_avatar)
                     last_known_price = current_price
                 else:
