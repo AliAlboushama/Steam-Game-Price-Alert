@@ -41,33 +41,45 @@ def main():
         bot_avatar = input("Enter the bot avatar URL (e.g., a link to a PNG image): ")
         save_user_info(country_code, language, webhook_url, bot_name, bot_avatar)
     else:
+        # Use saved user info
         country_code = user_info["country_code"]
         language = user_info["language"]
         webhook_url = user_info["webhook_url"]
         bot_name = user_info["bot_name"]
         bot_avatar = user_info["bot_avatar"]
 
-    # List saved games
-    games = get_all_games()
-    if games:
-        print("Saved games:")
-        for game_id, game_name in games:
-            print(f"{game_id}. {game_name}")
-        choice = input("Enter the number of the game to scan, or type 'add' to add a new game: ")
-    else:
-        choice = "add"
-
-    if choice.lower() == "add":
-        # Add a new game
-        game_link = input("Enter the Steam game link (e.g., https://store.steampowered.com/app/534380/): ")
-        game_name = input("Enter the game name: ")
-        add_game(game_name, game_link)
-        app_id = extract_app_id(game_link)
-    else:
-        # Use an existing game
-        game_id = int(choice)
-        game_link = get_game_link(game_id)
-        app_id = extract_app_id(game_link)
+    while True:
+        # List saved games
+        games = get_all_games()
+        if games:
+            print("Saved games:")
+            for game_id, game_name in games:
+                print(f"{game_id}. {game_name}")
+            
+            # Ask the user if they want to scan or add more games
+            choice = input("Do you want to (1) run the scan or (2) add more games to the database? Enter 1 or 2: ")
+            
+            if choice == "1":
+                # User wants to run the scan
+                game_choice = input("Enter the number of the game to scan: ")
+                game_id = int(game_choice)
+                game_link = get_game_link(game_id)
+                app_id = extract_app_id(game_link)
+                break  # Exit the loop and proceed to scanning
+            elif choice == "2":
+                # User wants to add more games
+                game_link = input("Enter the Steam game link (e.g., https://store.steampowered.com/app/534380/): ")
+                game_name = input("Enter the game name: ")
+                add_game(game_name, game_link)
+                print(f"Game '{game_name}' added successfully.")
+            else:
+                print("Invalid choice. Please enter 1 or 2.")
+        else:
+            # No games in the database, prompt to add a new game
+            game_link = input("Enter the Steam game link (e.g., https://store.steampowered.com/app/534380/): ")
+            game_name = input("Enter the game name: ")
+            add_game(game_name, game_link)
+            print(f"Game '{game_name}' added successfully.")
 
     last_known_price = None
 
