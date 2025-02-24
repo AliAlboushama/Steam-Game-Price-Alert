@@ -10,6 +10,8 @@
 - **Game Database**: Maintains game information in SQLite
 - **Sale Tracking**: Prevents duplicate notifications by tracking active sales
 
+![Discord Notification Preview](https://files.catbox.moe/jsnex3.png)
+
 ## How It Works
 
 1. Fetches game details from Steam API using the game's `app_id`
