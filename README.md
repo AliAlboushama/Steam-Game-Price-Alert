@@ -118,4 +118,3 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) file for 
 
 For issues or questions:
 - Open an issue on GitHub
-- Contact: your-email@example.com
