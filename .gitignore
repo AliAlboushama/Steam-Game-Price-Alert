@@ -1,0 +1,5 @@
+Steam-Game-Price-Alert/__pycache__/discord.cpython-311.pyc
+*.pyc
+Steam-Game-Price-Alert/saved_games.db
+Steam-Game-Price-Alert/user_info.json
+Steam-Game-Price-Alert/Steam-Game-Price-Alert.zip
