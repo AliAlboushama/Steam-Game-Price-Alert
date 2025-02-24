@@ -18,6 +18,14 @@ A Python script that monitors Steam game sales and sends Discord notifications w
 4. Saves sale details to prevent duplicate notifications
 5. Removes games from tracking when sales end
 
+## Discord Notification Preview
+
+Here's how the sale notifications appear in your Discord channel:
+
+![Discord Notification Preview](https://files.catbox.moe/9eiuob.png)
+
+The notification includes the game's thumbnail, pricing details, and a direct link to the Steam store page.
+
 ## Requirements
 
 - Python 3.x
@@ -27,7 +35,7 @@ A Python script that monitors Steam game sales and sends Discord notifications w
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/AliAlboushama/Steam-Game-Price-Alert.git
+git clone https://github.com/your-username/Steam-Game-Sale-Alerts.git
 cd Steam-Game-Sale-Alerts
 ```
 
