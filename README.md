@@ -1,6 +1,6 @@
 # Steam Game Sale Alert Bot
 
-A Python script that monitors Steam game sales and sends Discord notifications when games go on sale. The bot saves user preferences, game details, and sale information to prevent duplicate notifications.
+🎮 Never miss a Steam sale again! This bot monitors your wishlist games and instantly notifies you through Discord when prices drop. Perfect for gamers who want to grab their favorite titles at the best prices.
 
 ## Features
 
