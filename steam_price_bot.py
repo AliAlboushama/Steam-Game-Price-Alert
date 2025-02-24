@@ -18,6 +18,7 @@ def get_game_details(app_id, country_code, language):
     """Fetch game details from the Steam API."""
     steam_api_url = f'https://store.steampowered.com/api/appdetails?appids={app_id}&cc={country_code}&l={language}'
     try:
+        print("Fetching game details from Steam API...")
         response = requests.get(steam_api_url)
         response.raise_for_status()
         data = response.json()
@@ -82,14 +83,15 @@ def main():
                 print(f"{game_id}. {game_name}")
             
             # Ask the user if they want to scan or add more games
-            choice = input("Do you want to (1) run the scan or (2) add more games to the database? Enter 1 or 2: ")
+            choice = input("Choose an option:\n1. Scan for sales\n2. Add a new game\nEnter 1 or 2: ")
             
             if choice == "1":
                 # User wants to run the scan
-                game_choice = input("Enter the number of the game to scan: ")
+                game_choice = input("Enter the number of the game you want to scan (e.g., 1, 2, etc.): ")
                 game_id = int(game_choice)
                 game_link = get_game_link(game_id)
                 app_id = extract_app_id(game_link)
+                print(f"Selected game: {game_link} (App ID: {app_id})")
                 break  # Exit the loop and proceed to scanning
             elif choice == "2":
                 # User wants to add more games
@@ -103,6 +105,7 @@ def main():
                 continue  # Go back to listing games if the choice is invalid
         else:
             # No games in the database, prompt to add a new game
+            print("No games found in the database. Let's add one!")
             game_link = input("Enter the Steam game link (e.g., https://store.steampowered.com/app/534380/): ")
             game_name = input("Enter the game name: ")
             add_game(game_name, game_link)  # Add the game to the database
@@ -112,7 +115,12 @@ def main():
     last_known_price = None
 
     while True:
+        print("Fetching game details from Steam API...")
         game_data = get_game_details(app_id, country_code, language)
+        
+        # Print the raw API response for debugging
+        print("Steam API Response:", json.dumps(game_data, indent=4))
+        
         if game_data and 'price_overview' in game_data:
             price_info = game_data['price_overview']
             current_price = price_info['final'] / 100  # Convert cents to dollars
@@ -139,7 +147,7 @@ def main():
                         webhook_url=webhook_url,
                         bot_name=bot_name,
                         bot_avatar=bot_avatar,
-                        app_id=app_id  # Pass the app_id here
+                        app_id=app_id
                     )
                     # Save sale details
                     save_sale_details(app_id, game_name, current_price, discount_percent)
@@ -151,7 +159,6 @@ def main():
                 if app_id in saved_sales:
                     print("Sale has ended. Removing from saved_sale.json...")
                     remove_expired_sale(app_id)
-
         else:
             print("[ERROR] Price information not available.")
 
