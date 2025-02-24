@@ -1,9 +1,27 @@
 import time
 import requests
 import json
+import os
 from saved_info import load_user_info, save_user_info
 from saved_games import initialize_database, add_game, get_all_games, get_game_link
 from discord import send_discord_notification
+
+# List to store saved games dynamically
+saved_games = []
+
+def clear_screen():
+    """Clears the screen for better readability."""
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+def print_header(title):
+    """Prints a header with a cool design."""
+    print("\033[1;34m╔════════════════════════════════════════╗\033[0m")
+    print(f"\033[1;36m║  {title.center(34)}  ║\033[0m")
+    print("\033[1;34m╚════════════════════════════════════════╝\033[0m")
+
+def print_option(title, color_code="\033[0;33m"):
+    """Prints an option with a nice design."""
+    print(f"{color_code}  {title}\033[0m")
 
 def extract_app_id(game_link):
     """Extract the APP_ID from the Steam game link."""
@@ -18,7 +36,6 @@ def get_game_details(app_id, country_code, language):
     """Fetch game details from the Steam API."""
     steam_api_url = f'https://store.steampowered.com/api/appdetails?appids={app_id}&cc={country_code}&l={language}'
     try:
-        print("Fetching game details from Steam API...")
         response = requests.get(steam_api_url)
         response.raise_for_status()
         data = response.json()
@@ -65,8 +82,8 @@ def remove_game_from_database(game_id):
     else:
         print(f"[ERROR] Game ID {game_id} not found.")
 
-def main():
-    """Main loop to check for price changes every hour."""
+def main_menu():
+    """Displays the main menu and handles user choices."""
     initialize_database()
 
     # Load saved user info
@@ -87,66 +104,231 @@ def main():
         bot_avatar = user_info["bot_avatar"]
 
     while True:
+        clear_screen()
+        print_header("🎮 Saved Games 🎮")
+        
         games = get_all_games()
         if games:
-            print("\nSaved games:")
-            print("------------------------------")
-            for game_id, game_name in games:
-                print(f"{game_id}. {game_name}")
-            print("------------------------------")
-            
-            # Ask the user if they want to scan, add, or remove games
-            choice = input("Choose an option:\n1. Scan for sales\n2. Add a new game\n3. Scan multiple games\n4. Remove a game\nEnter 1, 2, 3 or 4: ")
-            
-            if choice == "1":
-                # User wants to run the scan for one game
-                game_choice = input("Enter the number of the game you want to scan (e.g., 1, 2, etc.): ")
-                game_id = int(game_choice)
+            for index, (game_id, game_name) in enumerate(games, start=1):
+                print(f"\033[1;32m  {index}. {game_name}\033[0m")
+        else:
+            print("\033[1;31m  No games added yet.\033[0m")
+
+        print_header("Choose an Option:")
+        print_option("1️⃣  Scan for sales")
+        print_option("2️⃣  Add a new game")
+        print_option("3️⃣  Scan multiple games")
+        print_option("4️⃣  Remove a game")
+
+        choice = input("\033[1;36mEnter a number (1-4): \033[0m")
+
+        if choice == "1":
+            scan_for_sales(country_code, language, webhook_url, bot_name, bot_avatar)
+        elif choice == "2":
+            add_game()
+        elif choice == "3":
+            scan_multiple_games(country_code, language, webhook_url, bot_name, bot_avatar)
+        elif choice == "4":
+            remove_game()
+        else:
+            print("\n\033[1;31mInvalid option. Try again!\033[0m\n")
+
+def add_game():
+    """Handles adding a new game with an option to add more or return."""
+    while True:
+        clear_screen()
+        print_header("Add a New Game")
+        steam_link = input("Enter Steam game link: ")
+        game_name = input("Enter game name: ")
+
+        # Add the game to the database
+        add_game(game_name, steam_link)
+
+        print(f"\n\033[1;32m✔ Game '{game_name}' added successfully!\033[0m\n")
+
+        # Ask user what to do next
+        print("\033[1;36mWhat do you want to do next?\033[0m")
+        print_option("1️⃣  Add another game")
+        print_option("2️⃣  Return to menu")
+
+        next_choice = input("\033[1;36mEnter a number (1-2): \033[0m")
+
+        if next_choice == "2":
+            break  # Return to main menu
+
+def remove_game():
+    """Removes a game from the saved games list."""
+    games = get_all_games()
+    if not games:
+        print("\n\033[1;31mNo games to remove!\033[0m")
+        input("\nPress Enter to return to menu...")
+        return
+
+    while True:
+        clear_screen()
+        print_header("Remove a Game")
+        print("\033[1;36mSelect a game to remove:\033[0m")
+        for index, (game_id, game_name) in enumerate(games, start=1):
+            print(f"\033[1;33m  {index}. {game_name}\033[0m")
+
+        try:
+            choice = int(input("\n\033[1;36mEnter game number to remove (or 0 to cancel): \033[0m"))
+            if choice == 0:
+                break
+            elif 1 <= choice <= len(games):
+                game_id, game_name = games[choice - 1]
+                remove_game_from_database(game_id)
+                print(f"\n\033[1;32m✔ '{game_name}' removed successfully!\033[0m")
+                input("\nPress Enter to return to menu...")
+                break
+            else:
+                print("\n\033[1;31mInvalid choice. Try again.\033[0m")
+        except ValueError:
+            print("\n\033[1;31mPlease enter a valid number.\033[0m")
+
+def scan_for_sales(country_code, language, webhook_url, bot_name, bot_avatar):
+    """Scans a single game for sales in an hourly loop."""
+    games = get_all_games()
+    if not games:
+        print("\nNo saved games to scan for sales!")
+        input("\nPress Enter to return to the menu...")
+        return
+
+    # Display the saved games with their IDs (indexes)
+    print("\nSelect a game to scan for sales:")
+    for index, (game_id, game_name) in enumerate(games, start=1):
+        print(f"  {index}. {game_name}")
+
+    try:
+        choice = int(input("\nEnter game number to scan (or 0 to cancel): "))
+        if choice == 0:
+            return  # Return to menu
+        elif 1 <= choice <= len(games):
+            game_id, game_name = games[choice - 1]
+            game_link = get_game_link(game_id)
+            app_id = extract_app_id(game_link)
+            if app_id:
+                print(f"\nScanning '{game_name}' for sales every hour...")
+                print("Press Ctrl+C to stop scanning and return to the menu.")
+                print("-------------------------------------------------")
+
+                try:
+                    while True:  # Infinite loop for continuous scanning
+                        print("Fetching game details from Steam API...")
+                        game_data = get_game_details(app_id, country_code, language)
+                        if game_data and 'price_overview' in game_data:
+                            price_info = game_data['price_overview']
+                            current_price = price_info['final'] / 100  # Convert cents to dollars
+                            discount_percent = price_info['discount_percent']
+                            image_url = game_data['header_image']
+
+                            print(f"Game: {game_name}")
+                            print(f"Current Price: ${current_price:.2f} USD")
+                            print(f"Discount: {discount_percent}%")
+
+                            saved_sales = load_saved_sales()
+
+                            if discount_percent > 0:
+                                if app_id not in saved_sales:
+                                    # New sale detected
+                                    last_known_price = saved_sales.get(app_id, {}).get("current_price", "N/A")
+                                    print(f"Sale detected! Last known price: {last_known_price}")
+                                    send_discord_notification(
+                                        game_name=game_name,
+                                        current_price=current_price,
+                                        discount_percent=discount_percent,
+                                        image_url=image_url,
+                                        webhook_url=webhook_url,
+                                        bot_name=bot_name,
+                                        bot_avatar=bot_avatar,
+                                        app_id=app_id
+                                    )
+                                    # Save sale details
+                                    save_sale_details(app_id, game_name, current_price, discount_percent)
+                                else:
+                                    print("Sale already notified. Skipping notification.")
+                            else:
+                                # Sale is no longer active
+                                if app_id in saved_sales:
+                                    print("Sale has ended. Removing from saved_sale.json...")
+                                    remove_expired_sale(app_id)
+                        else:
+                            print(f"[ERROR] Price information not available for '{game_name}'.")
+
+                        print("-------------------------------------------------")
+                        print("Sleeping for 1 hour before checking again...\n")
+                        time.sleep(3600)  # Wait 1 hour before checking again
+
+                except KeyboardInterrupt:
+                    print("\nScanning stopped. Returning to menu...")
+                    return  # Return to menu if user presses Ctrl+C
+            else:
+                print("[ERROR] Invalid game link.")
+        else:
+            print("\nInvalid choice. Try again.")
+    except ValueError:
+        print("\nPlease enter a valid number.")
+
+def scan_multiple_games(country_code, language, webhook_url, bot_name, bot_avatar):
+    """Scans multiple games for sales in an hourly loop."""
+    games = get_all_games()
+    if not games:
+        print("\nNo saved games to scan for sales!")
+        input("\nPress Enter to return to the menu...")
+        return
+
+    # Display the saved games with their IDs (indexes)
+    print("\nSelect multiple games by their IDs to scan for sales:")
+    for index, (game_id, game_name) in enumerate(games, start=1):
+        print(f"  {index}. {game_name}")
+    
+    # Ask the user to input game IDs separated by commas
+    game_ids_input = input("\nEnter game IDs (separated by commas) or 0 to cancel: ")
+    game_ids = [int(id.strip()) for id in game_ids_input.split(',') if id.strip().isdigit()]
+
+    if not game_ids or (len(game_ids) == 1 and game_ids[0] == 0):
+        print("\nNo valid game IDs entered. Returning to menu...")
+        input("\nPress Enter to return to the menu...")
+        return
+
+    # Check if the entered game IDs are valid
+    invalid_ids = [game_id for game_id in game_ids if game_id < 1 or game_id > len(games)]
+    if invalid_ids:
+        print(f"\nInvalid game IDs: {', '.join(map(str, invalid_ids))}. Please try again.")
+        input("\nPress Enter to return to the menu...")
+        return
+
+    # Get the selected games
+    selected_games = [(games[game_id - 1][0], games[game_id - 1][1]) for game_id in game_ids]
+
+    print(f"\nScanning the selected games for sales every hour...")
+    print("Press Ctrl+C to stop scanning and return to the menu.")
+    print("-------------------------------------------------")
+
+    try:
+        while True:  # Infinite loop for continuous scanning
+            for game_id, game_name in selected_games:
                 game_link = get_game_link(game_id)
                 app_id = extract_app_id(game_link)
-                print(f"Selected game: {game_link} (App ID: {app_id})")
-                break  # Exit the loop and proceed to scanning
-
-            elif choice == "2":
-                # User wants to add more games
-                game_link = input("Enter the Steam game link (e.g., https://store.steampowered.com/app/534380/): ")
-                game_name = input("Enter the game name: ")
-                add_game(game_name, game_link)  # Add the game to the database
-                print(f"Game '{game_name}' added successfully.")
-                continue  # Go back to listing games after adding
-
-            elif choice == "3":
-                # User wants to scan multiple games
-                game_choices = input("Enter the numbers of the games you want to scan, separated by commas (e.g., 1, 2, 3): ")
-                game_ids = [int(choice.strip()) for choice in game_choices.split(",")]
-                
-                for game_id in game_ids:
-                    game_link = get_game_link(game_id)
-                    app_id = extract_app_id(game_link)
-                    print(f"Scanning game: {game_link} (App ID: {app_id})")
-                    # Proceed with scanning each game
+                if app_id:
+                    print("Fetching game details from Steam API...")
                     game_data = get_game_details(app_id, country_code, language)
-                    
-                    # Print the raw API response for debugging
-                    print("Steam API Response:", json.dumps(game_data, indent=4))
-                    
                     if game_data and 'price_overview' in game_data:
                         price_info = game_data['price_overview']
                         current_price = price_info['final'] / 100  # Convert cents to dollars
                         discount_percent = price_info['discount_percent']
-                        game_name = game_data['name']
                         image_url = game_data['header_image']
 
                         print(f"Game: {game_name}")
                         print(f"Current Price: ${current_price:.2f} USD")
                         print(f"Discount: {discount_percent}%")
 
-                        # Load saved sales
                         saved_sales = load_saved_sales()
 
                         if discount_percent > 0:
                             if app_id not in saved_sales:
                                 # New sale detected
+                                last_known_price = saved_sales.get(app_id, {}).get("current_price", "N/A")
                                 print(f"Sale detected! Last known price: {last_known_price}")
                                 send_discord_notification(
                                     game_name=game_name,
@@ -160,7 +342,6 @@ def main():
                                 )
                                 # Save sale details
                                 save_sale_details(app_id, game_name, current_price, discount_percent)
-                                last_known_price = current_price
                             else:
                                 print("Sale already notified. Skipping notification.")
                         else:
@@ -168,69 +349,23 @@ def main():
                             if app_id in saved_sales:
                                 print("Sale has ended. Removing from saved_sale.json...")
                                 remove_expired_sale(app_id)
-        else:
-            print("No games found in the database. Let's add one!")
-            game_link = input("Enter the Steam game link (e.g., https://store.steampowered.com/app/534380/): ")
-            game_name = input("Enter the game name: ")
-            add_game(game_name, game_link)  # Add the game to the database
-            print(f"Game '{game_name}' added successfully.")
-            continue  # Go back to listing games after adding
-
-    last_known_price = None
-
-    while True:
-        print("Fetching game details from Steam API...")
-        game_data = get_game_details(app_id, country_code, language)
-        
-        # Print the raw API response for debugging
-        print("Steam API Response:", json.dumps(game_data, indent=4))
-        
-        if game_data and 'price_overview' in game_data:
-            price_info = game_data['price_overview']
-            current_price = price_info['final'] / 100  # Convert cents to dollars
-            discount_percent = price_info['discount_percent']
-            game_name = game_data['name']
-            image_url = game_data['header_image']
-
-            print(f"Game: {game_name}")
-            print(f"Current Price: ${current_price:.2f} USD")
-            print(f"Discount: {discount_percent}%")
-
-            # Load saved sales
-            saved_sales = load_saved_sales()
-
-            if discount_percent > 0:
-                if app_id not in saved_sales:
-                    # New sale detected
-                    print(f"Sale detected! Last known price: {last_known_price}")
-                    send_discord_notification(
-                        game_name=game_name,
-                        current_price=current_price,
-                        discount_percent=discount_percent,
-                        image_url=image_url,
-                        webhook_url=webhook_url,
-                        bot_name=bot_name,
-                        bot_avatar=bot_avatar,
-                        app_id=app_id
-                    )
-                    # Save sale details
-                    save_sale_details(app_id, game_name, current_price, discount_percent)
-                    last_known_price = current_price
+                    else:
+                        print(f"[ERROR] Price information not available for '{game_name}'.")
                 else:
-                    print("Sale already notified. Skipping notification.")
-            else:
-                # Sale is no longer active
-                if app_id in saved_sales:
-                    print("Sale has ended. Removing from saved_sale.json...")
-                    remove_expired_sale(app_id)
-        else:
-            print("[ERROR] Price information not available.")
+                    print(f"[ERROR] Invalid game link for '{game_name}'.")
 
-        print("Sleeping for 1 hour before checking again...\n")
-        time.sleep(3600)  # Wait 1 hour before checking again
+                print("-------------------------------------------------")
 
+            print("Sleeping for 1 hour before checking again...\n")
+            time.sleep(3600)  # Wait 1 hour before checking again
+
+    except KeyboardInterrupt:
+        print("\nScanning stopped. Returning to menu...")
+        return  # Return to menu if user presses Ctrl+C
+
+# Run the script
 if __name__ == "__main__":
     try:
-        main()
+        main_menu()
     except Exception as e:
         print(f"[ERROR] An error occurred: {e}")
