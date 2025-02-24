@@ -24,6 +24,6 @@ This Python script monitors Steam game sales and sends Discord notifications whe
 
 ## **Requirements**
 - Python 3.x
-- Required Python packages (install via `requirements.txt`):
+- Install the required Python package:
   ```bash
-  pip install -r requirements.txt
+  pip install requests
