@@ -3,7 +3,7 @@ import requests
 import json
 import os
 from saved_info import load_user_info, save_user_info
-from saved_games import initialize_database, add_game, get_all_games, get_game_link
+from saved_games import initialize_database, add_game as add_game_to_db, get_all_games, get_game_link
 from discord import send_discord_notification
 
 # List to store saved games dynamically
@@ -141,8 +141,8 @@ def add_game():
         steam_link = input("Enter Steam game link: ")
         game_name = input("Enter game name: ")
 
-        # Add the game to the database
-        add_game(game_name, steam_link)
+        # Add the game to the database using the imported function
+        add_game_to_db(game_name, steam_link)
 
         print(f"\n\033[1;32m✔ Game '{game_name}' added successfully!\033[0m\n")
 
