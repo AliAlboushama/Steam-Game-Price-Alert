@@ -27,7 +27,7 @@ A Python script that monitors Steam game sales and sends Discord notifications w
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/your-username/Steam-Game-Sale-Alerts.git
+git clone https://github.com/AliAlboushama/Steam-Game-Price-Alert.git
 cd Steam-Game-Sale-Alerts
 ```
 
