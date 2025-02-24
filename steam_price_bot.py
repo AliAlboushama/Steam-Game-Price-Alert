@@ -97,10 +97,11 @@ def main():
 
             if discount_percent > 0:
                 print(f"Sale detected! Last known price: {last_known_price}")
+                # Inside the main function, where the notification is sent:
                 if current_price != last_known_price:
-                    # Use the Discord module to send the notification
-                    send_discord_notification(game_name, current_price, discount_percent, image_url, webhook_url, bot_name, bot_avatar)
-                    last_known_price = current_price
+                # Use the Discord module to send the notification
+                send_discord_notification(game_name, current_price, discount_percent, image_url, webhook_url, bot_name, bot_avatar, app_id)
+                last_known_price = current_price
                 else:
                     print("Sale detected, but price has not changed. No notification sent.")
             else:
