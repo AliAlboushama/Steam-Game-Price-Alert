@@ -35,8 +35,8 @@ The notification includes the game's thumbnail, pricing details, and a direct li
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/your-username/Steam-Game-Sale-Alerts.git
-cd Steam-Game-Sale-Alerts
+git clone https://github.com/AliAlboushama/Steam-Game-Price-Alert.git
+cd Steam-Game-Price-Alert
 ```
 
 2. Install required package:
