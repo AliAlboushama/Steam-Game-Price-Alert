@@ -1,31 +1,3 @@
-import time
-import requests
-from saved_info import load_user_info, save_user_info
-from saved_games import initialize_database, add_game, get_all_games, get_game_link
-from discord import send_discord_notification
-
-def extract_app_id(game_link):
-    """Extract the APP_ID from the Steam game link."""
-    try:
-        app_id = game_link.split('/app/')[1].split('/')[0]
-        return app_id
-    except Exception as e:
-        print(f"[ERROR] Invalid game link. Please provide a valid Steam store link.")
-        return None
-
-def get_game_details(app_id, country_code, language):
-    """Fetch game details from the Steam API."""
-    steam_api_url = f'https://store.steampowered.com/api/appdetails?appids={app_id}&cc={country_code}&l={language}'
-    try:
-        print("Fetching game details from Steam API...")
-        response = requests.get(steam_api_url)
-        response.raise_for_status()
-        data = response.json()
-        return data[app_id]['data']
-    except Exception as e:
-        print(f"[ERROR] Error fetching game details: {e}")
-        return None
-
 def main():
     """Main loop to check for price changes every hour."""
     initialize_database()
@@ -97,11 +69,19 @@ def main():
 
             if discount_percent > 0:
                 print(f"Sale detected! Last known price: {last_known_price}")
-                # Inside the main function, where the notification is sent:
                 if current_price != last_known_price:
-                # Use the Discord module to send the notification
-                send_discord_notification(game_name, current_price, discount_percent, image_url, webhook_url, bot_name, bot_avatar, app_id)
-                last_known_price = current_price
+                    # Use the Discord module to send the notification
+                    send_discord_notification(
+                        game_name=game_name,
+                        current_price=current_price,
+                        discount_percent=discount_percent,
+                        image_url=image_url,
+                        webhook_url=webhook_url,
+                        bot_name=bot_name,
+                        bot_avatar=bot_avatar,
+                        app_id=app_id  # Pass the app_id here
+                    )
+                    last_known_price = current_price
                 else:
                     print("Sale detected, but price has not changed. No notification sent.")
             else:
@@ -112,6 +92,3 @@ def main():
 
         print("Sleeping for 1 hour before checking again...\n")
         time.sleep(3600)  # Wait 1 hour before checking again
-
-if __name__ == "__main__":
-    main()
