@@ -1,27 +1,11 @@
 import time
 import requests
 import json
-import os
-from saved_info import load_user_info, save_user_info
-from saved_games import initialize_database, add_game as add_game_to_db, get_all_games, get_game_link
+import threading  # For sound notifications
+from saved_games import get_game_link
+from utils import get_all_games
 from discord import send_discord_notification
-
-# List to store saved games dynamically
-saved_games = []
-
-def clear_screen():
-    """Clears the screen for better readability."""
-    os.system('cls' if os.name == 'nt' else 'clear')
-
-def print_header(title):
-    """Prints a header with a cool design."""
-    print("\033[1;34m╔════════════════════════════════════════╗\033[0m")
-    print(f"\033[1;36m║  {title.center(34)}  ║\033[0m")
-    print("\033[1;34m╚════════════════════════════════════════╝\033[0m")
-
-def print_option(title, color_code="\033[0;33m"):
-    """Prints an option with a nice design."""
-    print(f"{color_code}  {title}\033[0m")
+from pyfiglet import Figlet  # For ASCII art headers
 
 def extract_app_id(game_link):
     """Extract the APP_ID from the Steam game link."""
@@ -82,110 +66,6 @@ def remove_game_from_database(game_id):
     else:
         print(f"[ERROR] Game ID {game_id} not found.")
 
-def main_menu():
-    """Displays the main menu and handles user choices."""
-    initialize_database()
-
-    # Load saved user info
-    user_info = load_user_info()
-    if not user_info:
-        # Prompt for user info if not saved
-        country_code = input("Enter the country code (e.g., US, UK): ").upper()
-        language = input("Enter the language code (e.g., en for English): ").lower()
-        webhook_url = input("Enter your Discord webhook URL: ")
-        bot_name = input("Enter the bot name: ")
-        bot_avatar = input("Enter the bot avatar URL (e.g., a link to a PNG image): ")
-        save_user_info(country_code, language, webhook_url, bot_name, bot_avatar)
-    else:
-        country_code = user_info["country_code"]
-        language = user_info["language"]
-        webhook_url = user_info["webhook_url"]
-        bot_name = user_info["bot_name"]
-        bot_avatar = user_info["bot_avatar"]
-
-    while True:
-        clear_screen()
-        print_header("🎮 Saved Games 🎮")
-        
-        games = get_all_games()
-        if games:
-            for index, (game_id, game_name) in enumerate(games, start=1):
-                print(f"\033[1;32m  {index}. {game_name}\033[0m")
-        else:
-            print("\033[1;31m  No games added yet.\033[0m")
-
-        print_header("Choose an Option:")
-        print_option("1️⃣  Scan for sales")
-        print_option("2️⃣  Add a new game")
-        print_option("3️⃣  Scan multiple games")
-        print_option("4️⃣  Remove a game")
-
-        choice = input("\033[1;36mEnter a number (1-4): \033[0m")
-
-        if choice == "1":
-            scan_for_sales(country_code, language, webhook_url, bot_name, bot_avatar)
-        elif choice == "2":
-            add_game()
-        elif choice == "3":
-            scan_multiple_games(country_code, language, webhook_url, bot_name, bot_avatar)
-        elif choice == "4":
-            remove_game()
-        else:
-            print("\n\033[1;31mInvalid option. Try again!\033[0m\n")
-
-def add_game():
-    """Handles adding a new game with an option to add more or return."""
-    while True:
-        clear_screen()
-        print_header("Add a New Game")
-        steam_link = input("Enter Steam game link: ")
-        game_name = input("Enter game name: ")
-
-        # Add the game to the database using the imported function
-        add_game_to_db(game_name, steam_link)
-
-        print(f"\n\033[1;32m✔ Game '{game_name}' added successfully!\033[0m\n")
-
-        # Ask user what to do next
-        print("\033[1;36mWhat do you want to do next?\033[0m")
-        print_option("1️⃣  Add another game")
-        print_option("2️⃣  Return to menu")
-
-        next_choice = input("\033[1;36mEnter a number (1-2): \033[0m")
-
-        if next_choice == "2":
-            break  # Return to main menu
-
-def remove_game():
-    """Removes a game from the saved games list."""
-    games = get_all_games()
-    if not games:
-        print("\n\033[1;31mNo games to remove!\033[0m")
-        input("\nPress Enter to return to menu...")
-        return
-
-    while True:
-        clear_screen()
-        print_header("Remove a Game")
-        print("\033[1;36mSelect a game to remove:\033[0m")
-        for index, (game_id, game_name) in enumerate(games, start=1):
-            print(f"\033[1;33m  {index}. {game_name}\033[0m")
-
-        try:
-            choice = int(input("\n\033[1;36mEnter game number to remove (or 0 to cancel): \033[0m"))
-            if choice == 0:
-                break
-            elif 1 <= choice <= len(games):
-                game_id, game_name = games[choice - 1]
-                remove_game_from_database(game_id)
-                print(f"\n\033[1;32m✔ '{game_name}' removed successfully!\033[0m")
-                input("\nPress Enter to return to menu...")
-                break
-            else:
-                print("\n\033[1;31mInvalid choice. Try again.\033[0m")
-        except ValueError:
-            print("\n\033[1;31mPlease enter a valid number.\033[0m")
-
 def scan_for_sales(country_code, language, webhook_url, bot_name, bot_avatar):
     """Scans a single game for sales in an hourly loop."""
     games = get_all_games()
@@ -195,12 +75,12 @@ def scan_for_sales(country_code, language, webhook_url, bot_name, bot_avatar):
         return
 
     # Display the saved games with their IDs (indexes)
-    print("\nSelect a game to scan for sales:")
+    print("\033[1;35mSelect a game to scan for sales:\033[0m")
     for index, (game_id, game_name) in enumerate(games, start=1):
-        print(f"  {index}. {game_name}")
+        print(f"\033[1;36m  {index}. {game_name}\033[0m")
 
     try:
-        choice = int(input("\nEnter game number to scan (or 0 to cancel): "))
+        choice = int(input("\n\033[1;36mEnter game number to scan (or 0 to cancel): \033[0m"))
         if choice == 0:
             return  # Return to menu
         elif 1 <= choice <= len(games):
@@ -208,13 +88,14 @@ def scan_for_sales(country_code, language, webhook_url, bot_name, bot_avatar):
             game_link = get_game_link(game_id)
             app_id = extract_app_id(game_link)
             if app_id:
-                print(f"\nScanning '{game_name}' for sales every hour...")
+                print(f"\n\033[1;32mInitializing scan for '{game_name}'...\033[0m")
                 print("Press Ctrl+C to stop scanning and return to the menu.")
                 print("-------------------------------------------------")
 
                 try:
                     while True:  # Infinite loop for continuous scanning
-                        print("Fetching game details from Steam API...")
+                        hacker_text = "Fetching game details from Steam API..."
+                        print(f"\033[1;33m{hacker_text}\033[0m")
                         game_data = get_game_details(app_id, country_code, language)
                         if game_data and 'price_overview' in game_data:
                             price_info = game_data['price_overview']
@@ -222,9 +103,9 @@ def scan_for_sales(country_code, language, webhook_url, bot_name, bot_avatar):
                             discount_percent = price_info['discount_percent']
                             image_url = game_data['header_image']
 
-                            print(f"Game: {game_name}")
-                            print(f"Current Price: ${current_price:.2f} USD")
-                            print(f"Discount: {discount_percent}%")
+                            print(f"\033[1;36mGame: {game_name}\033[0m")
+                            print(f"\033[1;32mCurrent Price: ${current_price:.2f} USD\033[0m")
+                            print(f"\033[1;35mDiscount: {discount_percent}%\033[0m")
 
                             saved_sales = load_saved_sales()
 
@@ -232,7 +113,7 @@ def scan_for_sales(country_code, language, webhook_url, bot_name, bot_avatar):
                                 if app_id not in saved_sales:
                                     # New sale detected
                                     last_known_price = saved_sales.get(app_id, {}).get("current_price", "N/A")
-                                    print(f"Sale detected! Last known price: {last_known_price}")
+                                    print(f"\033[1;31mSale detected! Last known price: {last_known_price}\033[0m")
                                     send_discord_notification(
                                         game_name=game_name,
                                         current_price=current_price,
@@ -245,6 +126,8 @@ def scan_for_sales(country_code, language, webhook_url, bot_name, bot_avatar):
                                     )
                                     # Save sale details
                                     save_sale_details(app_id, game_name, current_price, discount_percent)
+                                    # Play sound notification
+                                    threading.Thread(target=play_sound).start()
                                 else:
                                     print("Sale already notified. Skipping notification.")
                             else:
@@ -278,12 +161,12 @@ def scan_multiple_games(country_code, language, webhook_url, bot_name, bot_avata
         return
 
     # Display the saved games with their IDs (indexes)
-    print("\nSelect multiple games by their IDs to scan for sales:")
+    print("\033[1;35mSelect multiple games by their IDs to scan for sales:\033[0m")
     for index, (game_id, game_name) in enumerate(games, start=1):
-        print(f"  {index}. {game_name}")
-    
+        print(f"\033[1;36m  {index}. {game_name}\033[0m")
+
     # Ask the user to input game IDs separated by commas
-    game_ids_input = input("\nEnter game IDs (separated by commas) or 0 to cancel: ")
+    game_ids_input = input("\n\033[1;36mEnter game IDs (separated by commas) or 0 to cancel: \033[0m")
     game_ids = [int(id.strip()) for id in game_ids_input.split(',') if id.strip().isdigit()]
 
     if not game_ids or (len(game_ids) == 1 and game_ids[0] == 0):
@@ -301,7 +184,7 @@ def scan_multiple_games(country_code, language, webhook_url, bot_name, bot_avata
     # Get the selected games
     selected_games = [(games[game_id - 1][0], games[game_id - 1][1]) for game_id in game_ids]
 
-    print(f"\nScanning the selected games for sales every hour...")
+    print(f"\n\033[1;32mScanning the selected games for sales every hour...\033[0m")
     print("Press Ctrl+C to stop scanning and return to the menu.")
     print("-------------------------------------------------")
 
@@ -311,7 +194,8 @@ def scan_multiple_games(country_code, language, webhook_url, bot_name, bot_avata
                 game_link = get_game_link(game_id)
                 app_id = extract_app_id(game_link)
                 if app_id:
-                    print("Fetching game details from Steam API...")
+                    hacker_text = "Fetching game details from Steam API..."
+                    print(f"\033[1;33m{hacker_text}\033[0m")
                     game_data = get_game_details(app_id, country_code, language)
                     if game_data and 'price_overview' in game_data:
                         price_info = game_data['price_overview']
@@ -319,9 +203,9 @@ def scan_multiple_games(country_code, language, webhook_url, bot_name, bot_avata
                         discount_percent = price_info['discount_percent']
                         image_url = game_data['header_image']
 
-                        print(f"Game: {game_name}")
-                        print(f"Current Price: ${current_price:.2f} USD")
-                        print(f"Discount: {discount_percent}%")
+                        print(f"\033[1;36mGame: {game_name}\033[0m")
+                        print(f"\033[1;32mCurrent Price: ${current_price:.2f} USD\033[0m")
+                        print(f"\033[1;35mDiscount: {discount_percent}%\033[0m")
 
                         saved_sales = load_saved_sales()
 
@@ -329,7 +213,7 @@ def scan_multiple_games(country_code, language, webhook_url, bot_name, bot_avata
                             if app_id not in saved_sales:
                                 # New sale detected
                                 last_known_price = saved_sales.get(app_id, {}).get("current_price", "N/A")
-                                print(f"Sale detected! Last known price: {last_known_price}")
+                                print(f"\033[1;31mSale detected! Last known price: {last_known_price}\033[0m")
                                 send_discord_notification(
                                     game_name=game_name,
                                     current_price=current_price,
@@ -342,6 +226,8 @@ def scan_multiple_games(country_code, language, webhook_url, bot_name, bot_avata
                                 )
                                 # Save sale details
                                 save_sale_details(app_id, game_name, current_price, discount_percent)
+                                # Play sound notification
+                                threading.Thread(target=play_sound).start()
                             else:
                                 print("Sale already notified. Skipping notification.")
                         else:
@@ -362,10 +248,3 @@ def scan_multiple_games(country_code, language, webhook_url, bot_name, bot_avata
     except KeyboardInterrupt:
         print("\nScanning stopped. Returning to menu...")
         return  # Return to menu if user presses Ctrl+C
-
-# Run the script
-if __name__ == "__main__":
-    try:
-        main_menu()
-    except Exception as e:
-        print(f"[ERROR] An error occurred: {e}")
