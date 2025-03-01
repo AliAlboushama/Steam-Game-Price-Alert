@@ -9,6 +9,7 @@
 - **User Preferences**: Stores country code, language, and Discord webhook settings
 - **Game Database**: Maintains game information in SQLite
 - **Sale Tracking**: Prevents duplicate notifications by tracking active sales
+- **Scan Multiple Games**: Track multiple game sales at once instead of just one per session.
 
 ## How It Works
 
