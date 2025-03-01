@@ -51,7 +51,7 @@ pip install requests
 
 4. Run the script:
 ```bash
-python3 steam_price_bot.py
+python3 main.py
 ```
 
 ## Usage
