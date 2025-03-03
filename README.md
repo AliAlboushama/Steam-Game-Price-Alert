@@ -17,9 +17,12 @@
 
 1. Fetches game details from Steam API using the game's `app_id`
 2. Compares current price with previous price to detect sales
-3. Sends Discord notification with game name, price, discount, and image
-4. Saves sale details to prevent duplicate notifications
-5. Removes games from tracking when sales end
+3. Checks against user-defined price targets when configured
+4. Sends Discord notification with game name, price, discount, and image
+5. Manages notification frequency to prevent Discord webhook rate limiting
+6. Saves sale details to prevent duplicate notifications
+7. Removes games from tracking when sales end
+8. Refreshes interface after each user interaction for better readability
 
 ## Discord Notification Preview
 
@@ -31,8 +34,10 @@ The notification includes the game's thumbnail, pricing details, and a direct li
 
 ## Requirements
 
-- Python 3.x
-- Required package: `requests`
+This project requires **Python 3.x** and the following packages:
+
+- `requests`
+- `logging`
 
 ## Installation
 
@@ -45,6 +50,7 @@ cd Steam-Game-Price-Alert
 2. Install required package:
 ```bash
 pip install requests
+pip install logging
 ```
 
 3. Set up Discord webhook:
@@ -73,7 +79,6 @@ These settings are saved in `user_info.json` for future use.
 
 You can add games by providing:
 - Steam game link (e.g., https://store.steampowered.com/app/12345/)
-- Game name
 
 ### Operation
 
