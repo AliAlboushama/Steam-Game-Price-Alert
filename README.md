@@ -10,6 +10,8 @@
 - **Game Database**: Maintains game information in SQLite
 - **Sale Tracking**: Prevents duplicate notifications by tracking active sales
 - **Scan Multiple Games**: Track multiple game sales at once instead of just one per session.
+- **Price Target Alerts**: Customize notifications for specific price thresholds or any discount
+- **Clear Screen System**: Automatically refreshes display after each question for better readability
 
 ## How It Works
 
