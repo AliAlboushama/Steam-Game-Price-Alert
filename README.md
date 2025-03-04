@@ -38,8 +38,6 @@ This project requires **Python 3.x** and the following packages:
 
 - `requests`
 - `logging`
-- `pyfiglet`
-- `schedule`
 
 ## Installation
 
