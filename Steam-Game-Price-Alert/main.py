@@ -1,13 +1,14 @@
-import os
-import sys
-import requests
 import logging
 import time
 from saved_info import load_user_info, save_user_info
 from saved_games import initialize_database, add_game as add_game_to_db, remove_game, save_price_threshold, get_price_threshold, get_game_link
-from utils import get_all_games
-from scanner import scan_for_sales, scan_multiple_games, extract_app_id, get_game_details
-from pyfiglet import Figlet
+from utils import (
+    get_all_games, extract_app_id, get_game_details, 
+    validate_country_code, validate_language_code, 
+    validate_webhook_url, validate_steam_link,
+    clear_screen, print_header
+)
+from scanner import scan_for_sales, scan_multiple_games
 from discord import send_discord_notification
 from stop_spam import save_sale_reminder, is_sale_notified, remove_expired_sale
 
@@ -20,17 +21,11 @@ BOT_NAME_PROMPT = "Enter the bot name: "
 BOT_AVATAR_PROMPT = "Enter the bot avatar URL (e.g., a link to a PNG image): "
 
 # Configure logging
-logging.basicConfig(filename='debug.log', level=logging.DEBUG,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
-
-def clear_screen():
-    """Clears the screen for better readability."""
-    os.system('cls' if os.name == 'nt' else 'clear')
-
-def print_header(title):
-    """Prints a header with a cool design using ASCII art."""
-    f = Figlet(font='slant')
-    print("\033[1;34m" + f.renderText(title) + "\033[0m")
+logging.basicConfig(
+    filename='debug.log', 
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 def print_option(title, color_code="\033[0;33m"):
     """Prints an option with a nice design."""
@@ -41,10 +36,25 @@ def get_user_input(prompt):
     return input(prompt).strip()
 
 def get_user_info():
-    """Gets user information from the user."""
-    country_code = get_user_input(COUNTRY_CODE_PROMPT).upper()
-    language = get_user_input(LANGUAGE_PROMPT).lower()
-    webhook_url = get_user_input(WEBHOOK_URL_PROMPT)
+    """Gets user information from the user with validation."""
+    while True:
+        country_code = get_user_input(COUNTRY_CODE_PROMPT).upper()
+        if validate_country_code(country_code):
+            break
+        print("\033[1;31mInvalid country code. Please enter a 2-letter code (e.g., US, UK, DE).\033[0m")
+    
+    while True:
+        language = get_user_input(LANGUAGE_PROMPT).lower()
+        if validate_language_code(language):
+            break
+        print("\033[1;31mInvalid language code. Please enter a valid code (e.g., en, es, fr).\033[0m")
+    
+    while True:
+        webhook_url = get_user_input(WEBHOOK_URL_PROMPT)
+        if validate_webhook_url(webhook_url):
+            break
+        print("\033[1;31mInvalid webhook URL. Please enter a valid Discord webhook URL.\033[0m")
+    
     bot_name = get_user_input(BOT_NAME_PROMPT)
     bot_avatar = get_user_input(BOT_AVATAR_PROMPT)
     return country_code, language, webhook_url, bot_name, bot_avatar
@@ -219,9 +229,12 @@ def add_game():
         if not steam_link:
             print("\033[1;31mSteam link cannot be empty.\033[0m")
             continue
+        if not validate_steam_link(steam_link):
+            print("\033[1;31mInvalid Steam link format. Please provide a valid Steam store link (e.g., https://store.steampowered.com/app/123456/).\033[0m")
+            continue
         app_id = extract_app_id(steam_link)
         if not app_id:
-            print("\033[1;31mInvalid Steam link. Please provide a valid Steam store link.\033[0m")
+            print("\033[1;31mCould not extract app ID from Steam link. Please provide a valid Steam store link.\033[0m")
             continue
         game_data = get_game_details(app_id, "US", "en")
         if game_data:
