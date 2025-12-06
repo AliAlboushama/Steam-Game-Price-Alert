@@ -2,6 +2,8 @@
 
 🎮 Never miss a Steam sale again! This bot monitors your wishlist games and instantly notifies you through Discord when prices drop. Perfect for gamers who want to grab their favorite titles at the best prices.
 
+![Scanning For Sales UI](https://files.catbox.moe/8quot8.png)
+
 ## Features
 
 - **Sale Monitoring**: Automatically checks game prices via Steam API hourly
