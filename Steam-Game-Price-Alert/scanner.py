@@ -1,62 +1,10 @@
 import time
-import requests
-import json
 import logging
 from saved_games import get_game_link
-from utils import get_all_games
-from saved_info import save_user_info
-from utils import clear_screen, print_header
+from utils import get_all_games, clear_screen, print_header, extract_app_id, get_game_details
 from stop_spam import save_sale_reminder, is_sale_notified, remove_expired_sale
 from discord import send_discord_notification
 from saved_games import get_price_threshold
-from pyfiglet import Figlet  # For ASCII art headers
-
-def extract_app_id(game_link):
-    """Extract the APP_ID from the Steam game link."""
-    try:
-        app_id = game_link.split('/app/')[1].split('/')[0]
-        return app_id
-    except Exception as e:
-        print(f"[ERROR] Invalid game link. Please provide a valid Steam store link.")
-        return None
-
-def get_game_details(app_id, country_code, language):
-    """Fetch game details from the Steam API with error handling."""
-    try:
-        response = requests.get(f'https://store.steampowered.com/api/appdetails?appids={app_id}&cc={country_code}&l={language}')
-        response.raise_for_status()
-        data = response.json()
-        return data.get(app_id, {}).get('data')
-    except Exception as e:
-        logging.error(f"Error fetching details for app {app_id}: {e}")
-        return None
-
-def load_saved_sales():
-    """Load saved sale details from saved_sale.json."""
-    try:
-        with open("saved_sale.json", "r") as file:
-            return json.load(file)
-    except FileNotFoundError:
-        return {}  # Return an empty dictionary if the file doesn't exist
-
-def save_sale_details(app_id, game_name, current_price, discount_percent):
-    """Save sale details to saved_sale.json."""
-    saved_sales = load_saved_sales()
-    saved_sales[app_id] = {
-        "game_name": game_name,
-        "current_price": current_price,
-        "discount_percent": discount_percent
-    }
-    with open("saved_sale.json", "w") as file:
-        json.dump(saved_sales, file, indent=4)
-
-def remove_expired_sale(app_id):
-    """Remove expired sale details from saved_sale.json."""
-    saved_sales = load_saved_sales()
-    if app_id in saved_sales:
-        del saved_sales[app_id]
-        with open("saved_sale.json", "w") as file:
-            json.dump(saved_sales, file, indent=4)
 
 def scan_for_sales(country_code, language, webhook_url, bot_name, bot_avatar):
     """Scans a single game for sales in an hourly loop."""
@@ -99,13 +47,10 @@ def scan_for_sales(country_code, language, webhook_url, bot_name, bot_avatar):
                             print(f"\033[1;32mCurrent Price: ${current_price:.2f} USD\033[0m")
                             print(f"\033[1;35mDiscount: {discount_percent}%\033[0m")
 
-                            saved_sales = load_saved_sales()
-
                             if discount_percent > 0:
-                                if app_id not in saved_sales:
+                                if not is_sale_notified(app_id):
                                     # New sale detected
-                                    last_known_price = saved_sales.get(app_id, {}).get("current_price", "N/A")
-                                    print(f"\033[1;31mSale detected! Last known price: {last_known_price}\033[0m")
+                                    print(f"\033[1;31mSale detected! Current price: ${current_price:.2f} ({discount_percent}% off)\033[0m")
                                     send_discord_notification(
                                         game_name=game_name,
                                         current_price=current_price,
@@ -117,13 +62,13 @@ def scan_for_sales(country_code, language, webhook_url, bot_name, bot_avatar):
                                         app_id=app_id
                                     )
                                     # Save sale details
-                                    save_sale_details(app_id, game_name, current_price, discount_percent)
+                                    save_sale_reminder(app_id, game_name, current_price, discount_percent)
                                 else:
                                     print("Sale already notified. Skipping notification.")
                             else:
                                 # Sale is no longer active
-                                if app_id in saved_sales:
-                                    print("Sale has ended. Removing from saved_sale.json...")
+                                if is_sale_notified(app_id):
+                                    print("Sale has ended. Removing from sale reminders...")
                                     remove_expired_sale(app_id)
                         else:
                             print(f"[ERROR] Price information not available for '{game_name}'.")
@@ -210,10 +155,8 @@ def scan_multiple_games(country_code, language, webhook_url, bot_name, bot_avata
                         print(f"\033[1;32mCurrent Price: ${current_price:.2f} USD\033[0m")
                         print(f"\033[1;35mDiscount: {discount_percent}%\033[0m")
 
-                        saved_sales = load_saved_sales()
-
                         if discount_percent > 0:
-                            if app_id not in saved_sales:
+                            if not is_sale_notified(app_id):
                                 # New sale detected
                                 print(f"\033[1;31mSale detected for '{game_name}'!\033[0m")
                                 send_discord_notification(
@@ -226,11 +169,11 @@ def scan_multiple_games(country_code, language, webhook_url, bot_name, bot_avata
                                     bot_avatar=bot_avatar,
                                     app_id=app_id
                                 )
-                                save_sale_details(app_id, game_name, current_price, discount_percent)
+                                save_sale_reminder(app_id, game_name, current_price, discount_percent)
                             else:
                                 print(f"Sale already notified for '{game_name}'. Skipping notification.")
                         else:
-                            if app_id in saved_sales:
+                            if is_sale_notified(app_id):
                                 remove_expired_sale(app_id)
 
                 print("-------------------------------------------------")
