@@ -46,11 +46,15 @@ def send_discord_notification(
 
     try:
         logging.info("Sending Discord notification...")
-        response = requests.post(webhook_url, json=payload)
+        response = requests.post(webhook_url, json=payload, timeout=10)
         response.raise_for_status()
         logging.info("Notification sent successfully.")
+    except requests.Timeout:
+        logging.error("Timeout while sending Discord notification")
     except requests.RequestException as e:
         logging.error(f"Error sending Discord notification: {e}")
+    except Exception as e:
+        logging.error(f"Unexpected error sending Discord notification: {e}")
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
