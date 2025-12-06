@@ -5,24 +5,34 @@ import logging
 RED = 16711680
 GREEN = 32768
 
-def construct_embed(game_name, current_price, discount_percent, image_url, app_id):
+def construct_embed(game_name, current_price, discount_percent, image_url, app_id, is_historical_low=False, historical_low=None):
     """
     Construct a Discord embed based on the game details.
     """
+    description_parts = []
+    
     if discount_percent > 0:
-        description = f"On sale: ${current_price:.2f} USD ({discount_percent}% off)"
+        description_parts.append(f"On sale: ${current_price:.2f} USD ({discount_percent}% off)")
         color = RED
     else:
-        description = f"Price target met: ${current_price:.2f} USD"
+        description_parts.append(f"Price target met: ${current_price:.2f} USD")
         color = GREEN
+    
+    # Add historical low indicator
+    if is_historical_low:
+        description_parts.append("⭐ **LOWEST PRICE EVER!** ⭐")
+    elif historical_low and historical_low < current_price:
+        description_parts.append(f"Historical Low: ${historical_low:.2f}")
 
-    return {
+    embed = {
         "title": game_name,
-        "description": description,
+        "description": "\n".join(description_parts),
         "url": f"https://store.steampowered.com/app/{app_id}/",
         "color": color,
         "image": {"url": image_url}
     }
+    
+    return embed
 
 def send_discord_notification(
     game_name: str,
@@ -32,12 +42,14 @@ def send_discord_notification(
     webhook_url: str,
     bot_name: str,
     bot_avatar: str,
-    app_id: int
+    app_id: int,
+    is_historical_low: bool = False,
+    historical_low: float = None
 ) -> None:
     """
     Send a Discord notification about the sale or price target met.
     """
-    embed = construct_embed(game_name, current_price, discount_percent, image_url, app_id)
+    embed = construct_embed(game_name, current_price, discount_percent, image_url, app_id, is_historical_low, historical_low)
     payload = {
         "username": bot_name,
         "avatar_url": bot_avatar,

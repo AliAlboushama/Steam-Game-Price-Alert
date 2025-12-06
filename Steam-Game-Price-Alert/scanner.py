@@ -1,6 +1,6 @@
 import time
 import logging
-from saved_games import get_game_link
+from saved_games import get_game_link, save_price_history, get_historical_low
 from utils import get_all_games, clear_screen, print_header, extract_app_id, get_game_details
 from stop_spam import save_sale_reminder, is_sale_notified, remove_expired_sale
 from discord import send_discord_notification
@@ -42,10 +42,19 @@ def scan_for_sales(country_code, language, webhook_url, bot_name, bot_avatar):
                             current_price = price_info['final'] / 100  # Convert cents to dollars
                             discount_percent = price_info['discount_percent']
                             image_url = game_data['header_image']
+                            
+                            # Save price history
+                            save_price_history(game_id, app_id, current_price, discount_percent)
+                            
+                            # Check for historical low
+                            historical_low = get_historical_low(game_id, app_id)
+                            is_historical_low = historical_low is not None and current_price <= historical_low
 
                             print(f"\033[1;36mGame: {game_name}\033[0m")
                             print(f"\033[1;32mCurrent Price: ${current_price:.2f} USD\033[0m")
                             print(f"\033[1;35mDiscount: {discount_percent}%\033[0m")
+                            if is_historical_low:
+                                print(f"\033[1;33m⭐ LOWEST PRICE EVER! ⭐\033[0m")
 
                             if discount_percent > 0:
                                 if not is_sale_notified(app_id):
@@ -59,7 +68,9 @@ def scan_for_sales(country_code, language, webhook_url, bot_name, bot_avatar):
                                         webhook_url=webhook_url,
                                         bot_name=bot_name,
                                         bot_avatar=bot_avatar,
-                                        app_id=app_id
+                                        app_id=app_id,
+                                        is_historical_low=is_historical_low,
+                                        historical_low=historical_low
                                     )
                                     # Save sale details
                                     save_sale_reminder(app_id, game_name, current_price, discount_percent)
@@ -150,10 +161,19 @@ def scan_multiple_games(country_code, language, webhook_url, bot_name, bot_avata
                         current_price = price_info['final'] / 100  # Convert cents to dollars
                         discount_percent = price_info['discount_percent']
                         image_url = game_data['header_image']
+                        
+                        # Save price history
+                        save_price_history(game_id, app_id, current_price, discount_percent)
+                        
+                        # Check for historical low
+                        historical_low = get_historical_low(game_id, app_id)
+                        is_historical_low = historical_low is not None and current_price <= historical_low
 
                         print(f"\033[1;36mGame: {game_name}\033[0m")
                         print(f"\033[1;32mCurrent Price: ${current_price:.2f} USD\033[0m")
                         print(f"\033[1;35mDiscount: {discount_percent}%\033[0m")
+                        if is_historical_low:
+                            print(f"\033[1;33m⭐ LOWEST PRICE EVER! ⭐\033[0m")
 
                         if discount_percent > 0:
                             if not is_sale_notified(app_id):
@@ -167,7 +187,9 @@ def scan_multiple_games(country_code, language, webhook_url, bot_name, bot_avata
                                     webhook_url=webhook_url,
                                     bot_name=bot_name,
                                     bot_avatar=bot_avatar,
-                                    app_id=app_id
+                                    app_id=app_id,
+                                    is_historical_low=is_historical_low,
+                                    historical_low=historical_low
                                 )
                                 save_sale_reminder(app_id, game_name, current_price, discount_percent)
                             else:
