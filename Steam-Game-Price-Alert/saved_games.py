@@ -16,6 +16,23 @@ def initialize_database():
                     price_threshold REAL
                 )
             ''')
+            # Create price_history table for tracking price changes
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS price_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    game_id INTEGER NOT NULL,
+                    app_id TEXT NOT NULL,
+                    price REAL NOT NULL,
+                    discount_percent INTEGER NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (game_id) REFERENCES games(id)
+                )
+            ''')
+            # Create index for faster queries
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_price_history_game_app 
+                ON price_history(game_id, app_id, timestamp)
+            ''')
             conn.commit()
     except sqlite3.Error as e:
         logging.error(f"Database initialization error: {e}")
@@ -92,6 +109,52 @@ def get_price_threshold(game_id):
     except sqlite3.Error as e:
         logging.error(f"Error retrieving price threshold for game ID {game_id}: {e}")
         return None
+
+def save_price_history(game_id, app_id, price, discount_percent):
+    """Save price history for a game."""
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO price_history (game_id, app_id, price, discount_percent)
+                VALUES (?, ?, ?, ?)
+            ''', (game_id, app_id, price, discount_percent))
+            conn.commit()
+    except sqlite3.Error as e:
+        logging.error(f"Error saving price history for game ID {game_id}: {e}")
+
+def get_historical_low(game_id, app_id):
+    """Get the historical lowest price for a game."""
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT MIN(price), timestamp 
+                FROM price_history 
+                WHERE game_id = ? AND app_id = ?
+            ''', (game_id, app_id))
+            result = cursor.fetchone()
+            return result[0] if result and result[0] is not None else None
+    except sqlite3.Error as e:
+        logging.error(f"Error retrieving historical low for game ID {game_id}: {e}")
+        return None
+
+def get_price_history(game_id, app_id, limit=10):
+    """Get recent price history for a game."""
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT price, discount_percent, timestamp 
+                FROM price_history 
+                WHERE game_id = ? AND app_id = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+            ''', (game_id, app_id, limit))
+            return cursor.fetchall()
+    except sqlite3.Error as e:
+        logging.error(f"Error retrieving price history for game ID {game_id}: {e}")
+        return []
 
 # This allows testing this module independently
 if __name__ == "__main__":

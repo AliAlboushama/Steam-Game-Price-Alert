@@ -46,6 +46,53 @@ def get_game_details(app_id, country_code, language):
         logging.error(f"Unexpected error fetching details for app {app_id}: {e}")
         return None
 
+def get_detailed_game_info(app_id, country_code, language):
+    """Get detailed game information including release date, reviews, and tags."""
+    game_data = get_game_details(app_id, country_code, language)
+    if not game_data:
+        return None
+    
+    info = {
+        'name': game_data.get('name', 'Unknown'),
+        'release_date': game_data.get('release_date', {}).get('date', 'Unknown'),
+        'header_image': game_data.get('header_image', ''),
+        'short_description': game_data.get('short_description', 'No description available'),
+        'price_overview': game_data.get('price_overview'),
+        'genres': [],
+        'categories': [],
+        'recommendations': game_data.get('recommendations', {}).get('total', 0),
+        'metacritic': game_data.get('metacritic', {}).get('score', None),
+        'developers': game_data.get('developers', []),
+        'publishers': game_data.get('publishers', []),
+    }
+    
+    # Extract genres
+    if 'genres' in game_data:
+        info['genres'] = [genre.get('description', '') for genre in game_data['genres']]
+    
+    # Extract categories
+    if 'categories' in game_data:
+        info['categories'] = [cat.get('description', '') for cat in game_data['categories']]
+    
+    # Get review summary if available
+    if 'reviews' in game_data:
+        reviews = game_data['reviews']
+        info['review_summary'] = reviews.get('summary', 'No reviews')
+        info['review_score'] = reviews.get('review_score', 0)
+        info['review_score_desc'] = reviews.get('review_score_desc', 'No reviews')
+        info['total_reviews'] = reviews.get('total', 0)
+        info['total_positive'] = reviews.get('total_positive', 0)
+        info['total_negative'] = reviews.get('total_negative', 0)
+    else:
+        info['review_summary'] = 'No reviews available'
+        info['review_score'] = 0
+        info['review_score_desc'] = 'No reviews'
+        info['total_reviews'] = 0
+        info['total_positive'] = 0
+        info['total_negative'] = 0
+    
+    return info
+
 def validate_country_code(country_code):
     """Validate country code format (2 uppercase letters)."""
     if not country_code or len(country_code) != 2:

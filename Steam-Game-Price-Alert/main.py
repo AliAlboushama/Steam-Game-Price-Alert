@@ -3,10 +3,15 @@ import time
 from saved_info import load_user_info, save_user_info
 from saved_games import initialize_database, add_game as add_game_to_db, remove_game, save_price_threshold, get_price_threshold, get_game_link
 from utils import (
-    get_all_games, extract_app_id, get_game_details, 
+    get_all_games, extract_app_id, get_game_details, get_detailed_game_info,
     validate_country_code, validate_language_code, 
     validate_webhook_url, validate_steam_link,
     clear_screen, print_header
+)
+from saved_games import (
+    initialize_database, add_game as add_game_to_db, remove_game, 
+    save_price_threshold, get_price_threshold, get_game_link,
+    save_price_history, get_historical_low
 )
 from scanner import scan_for_sales, scan_multiple_games
 from discord import send_discord_notification
@@ -108,10 +113,19 @@ def scan_for_sales_with_threshold(country_code, language, webhook_url, bot_name,
                             current_price = price_info['final'] / 100  # Convert cents to dollars
                             discount_percent = price_info['discount_percent']
                             image_url = game_data['header_image']
+                            
+                            # Save price history
+                            save_price_history(game_id, app_id, current_price, discount_percent)
+                            
+                            # Check for historical low
+                            historical_low = get_historical_low(game_id, app_id)
+                            is_historical_low = historical_low is not None and current_price <= historical_low
 
                             print(f"\n\033[1;36mGame: {game_name}\033[0m")
                             print(f"\033[1;32mCurrent Price: ${current_price:.2f} USD\033[0m")
                             print(f"\033[1;35mDiscount: {discount_percent}%\033[0m")
+                            if is_historical_low:
+                                print(f"\033[1;33m⭐ LOWEST PRICE EVER! ⭐\033[0m")
 
                             if mode_choice == "1":
                                 # Use price target
@@ -127,7 +141,9 @@ def scan_for_sales_with_threshold(country_code, language, webhook_url, bot_name,
                                             webhook_url=webhook_url,
                                             bot_name=bot_name,
                                             bot_avatar=bot_avatar,
-                                            app_id=app_id
+                                            app_id=app_id,
+                                            is_historical_low=is_historical_low,
+                                            historical_low=historical_low
                                         )
                                         save_sale_reminder(app_id, game_name, current_price, discount_percent)
                                     else:
@@ -149,7 +165,9 @@ def scan_for_sales_with_threshold(country_code, language, webhook_url, bot_name,
                                             webhook_url=webhook_url,
                                             bot_name=bot_name,
                                             bot_avatar=bot_avatar,
-                                            app_id=app_id
+                                            app_id=app_id,
+                                            is_historical_low=is_historical_low,
+                                            historical_low=historical_low
                                         )
                                         save_sale_reminder(app_id, game_name, current_price, discount_percent)
                                     else:
@@ -206,7 +224,9 @@ def main_menu():
         print_option("3. Scan multiple games")
         print_option("4. Remove a game")
         print_option("5. Set price threshold")
-        choice = get_user_input("\033[1;36mEnter a number (1-5): \033[0m")
+        print_option("6. View current prices")
+        print_option("7. View detailed game info")
+        choice = get_user_input("\033[1;36mEnter a number (1-7): \033[0m")
         if choice == "1":
             scan_for_sales_with_threshold(country_code, language, webhook_url, bot_name, bot_avatar)
         elif choice == "2":
@@ -217,6 +237,10 @@ def main_menu():
             remove_game_menu()
         elif choice == "5":
             set_price_threshold()
+        elif choice == "6":
+            view_current_prices(country_code, language)
+        elif choice == "7":
+            view_detailed_game_info(country_code, language)
         else:
             print("\n\033[1;31mInvalid option. Try again!\033[0m\n")
 
@@ -308,6 +332,165 @@ def set_price_threshold():
                 print(f"\n\033[1;32mPrice threshold for '{game_name}' set to {threshold} successfully!\033[0m")
                 input("\nPress Enter to return to menu...")
                 break
+            else:
+                print("\n\033[1;31mInvalid choice. Try again.\033[0m")
+        except ValueError:
+            print("\n\033[1;31mPlease enter a valid number.\033[0m")
+
+def view_current_prices(country_code, language):
+    """View current prices for all games in the watchlist."""
+    clear_screen()
+    print_header("💰 Current Prices 💰")
+    games = get_all_games()
+    if not games:
+        print("\n\033[1;31mNo games in watchlist!\033[0m")
+        input("\nPress Enter to return to menu...")
+        return
+    
+    print("\n\033[1;33mFetching current prices...\033[0m\n")
+    print("-" * 80)
+    
+    for game_id, game_name in games:
+        game_link = get_game_link(game_id)
+        app_id = extract_app_id(game_link)
+        if app_id:
+            game_data = get_game_details(app_id, country_code, language)
+            if game_data and 'price_overview' in game_data:
+                price_info = game_data['price_overview']
+                current_price = price_info['final'] / 100
+                discount_percent = price_info['discount_percent']
+                original_price = price_info.get('initial', price_info['final']) / 100
+                
+                # Get historical low
+                historical_low = get_historical_low(game_id, app_id)
+                is_historical_low = historical_low is not None and current_price <= historical_low
+                
+                print(f"\033[1;36m{game_name}\033[0m")
+                if discount_percent > 0:
+                    print(f"  Price: \033[1;32m${current_price:.2f}\033[0m (was ${original_price:.2f}) - \033[1;31m{discount_percent}% OFF\033[0m")
+                else:
+                    print(f"  Price: \033[1;32m${current_price:.2f}\033[0m")
+                
+                if is_historical_low:
+                    print(f"  \033[1;33m⭐ LOWEST PRICE EVER! ⭐\033[0m")
+                elif historical_low:
+                    print(f"  Historical Low: ${historical_low:.2f}")
+                
+                # Save to price history
+                save_price_history(game_id, app_id, current_price, discount_percent)
+            else:
+                print(f"\033[1;36m{game_name}\033[0m")
+                print(f"  \033[1;31mPrice information not available\033[0m")
+        print("-" * 80)
+    
+    input("\nPress Enter to return to menu...")
+
+def view_detailed_game_info(country_code, language):
+    """View detailed information for a selected game."""
+    games = get_all_games()
+    if not games:
+        print("\n\033[1;31mNo games in watchlist!\033[0m")
+        input("\nPress Enter to return to menu...")
+        return
+    
+    while True:
+        clear_screen()
+        print_header("📋 Game Information 📋")
+        print("\033[1;36mSelect a game to view detailed information:\033[0m")
+        for index, (game_id, game_name) in enumerate(games, start=1):
+            print(f"\033[1;33m {index}. {game_name}\033[0m")
+        
+        try:
+            choice = int(get_user_input("\n\033[1;36mEnter game number (or 0 to cancel): \033[0m"))
+            if choice == 0:
+                break
+            elif 1 <= choice <= len(games):
+                game_id, game_name = games[choice - 1]
+                game_link = get_game_link(game_id)
+                app_id = extract_app_id(game_link)
+                
+                if app_id:
+                    clear_screen()
+                    print_header("📋 Game Details 📋")
+                    print("\033[1;33mLoading game information...\033[0m\n")
+                    
+                    game_info = get_detailed_game_info(app_id, country_code, language)
+                    if game_info:
+                        print(f"\033[1;36m{game_info['name']}\033[0m")
+                        print("=" * 80)
+                        
+                        # Price information
+                        if game_info['price_overview']:
+                            price_info = game_info['price_overview']
+                            current_price = price_info['final'] / 100
+                            discount_percent = price_info['discount_percent']
+                            original_price = price_info.get('initial', price_info['final']) / 100
+                            
+                            print(f"\n\033[1;32m💰 Price Information:\033[0m")
+                            if discount_percent > 0:
+                                print(f"  Current: \033[1;32m${current_price:.2f}\033[0m (was ${original_price:.2f}) - \033[1;31m{discount_percent}% OFF\033[0m")
+                            else:
+                                print(f"  Current: \033[1;32m${current_price:.2f}\033[0m")
+                            
+                            # Historical low
+                            historical_low = get_historical_low(game_id, app_id)
+                            if historical_low:
+                                is_lowest = current_price <= historical_low
+                                if is_lowest:
+                                    print(f"  \033[1;33m⭐ LOWEST PRICE EVER! ⭐\033[0m")
+                                else:
+                                    print(f"  Historical Low: ${historical_low:.2f}")
+                        
+                        # Release date
+                        print(f"\n\033[1;32m📅 Release Date:\033[0m {game_info['release_date']}")
+                        
+                        # Developers and Publishers
+                        if game_info['developers']:
+                            print(f"\n\033[1;32m👨‍💻 Developers:\033[0m {', '.join(game_info['developers'])}")
+                        if game_info['publishers']:
+                            print(f"\n\033[1;32m🏢 Publishers:\033[0m {', '.join(game_info['publishers'])}")
+                        
+                        # Genres
+                        if game_info['genres']:
+                            print(f"\n\033[1;32m🎮 Genres:\033[0m {', '.join(game_info['genres'])}")
+                        
+                        # Categories
+                        if game_info['categories']:
+                            print(f"\n\033[1;32m📂 Categories:\033[0m {', '.join(game_info['categories'])}")
+                        
+                        # Reviews
+                        print(f"\n\033[1;32m⭐ Reviews:\033[0m")
+                        print(f"  Summary: {game_info['review_summary']}")
+                        if game_info['total_reviews'] > 0:
+                            print(f"  Score: {game_info['review_score']}/100 ({game_info['review_score_desc']})")
+                            print(f"  Total Reviews: {game_info['total_reviews']:,}")
+                            print(f"  Positive: {game_info['total_positive']:,} | Negative: {game_info['total_negative']:,}")
+                        
+                        # Metacritic
+                        if game_info['metacritic']:
+                            print(f"\n\033[1;32m🎯 Metacritic Score:\033[0m {game_info['metacritic']}/100")
+                        
+                        # Recommendations
+                        if game_info['recommendations'] > 0:
+                            print(f"\n\033[1;32m👍 Recommendations:\033[0m {game_info['recommendations']:,}")
+                        
+                        # Description
+                        if game_info['short_description']:
+                            print(f"\n\033[1;32m📝 Description:\033[0m")
+                            # Wrap description text
+                            desc = game_info['short_description']
+                            if len(desc) > 200:
+                                desc = desc[:200] + "..."
+                            print(f"  {desc}")
+                        
+                        print("\n" + "=" * 80)
+                    else:
+                        print(f"\n\033[1;31mFailed to fetch game information.\033[0m")
+                    
+                    input("\nPress Enter to return to menu...")
+                    break
+                else:
+                    print("\n\033[1;31mInvalid game link.\033[0m")
             else:
                 print("\n\033[1;31mInvalid choice. Try again.\033[0m")
         except ValueError:
