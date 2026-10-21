@@ -1,0 +1,7 @@
+.git
+**/__pycache__
+**/user_info.json
+**/saved_games.db
+**/sale_reminder.json*
+**/debug.log
+data/
