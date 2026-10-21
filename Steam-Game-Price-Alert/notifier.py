@@ -8,7 +8,7 @@ GREEN = 32768
 GOLD = 16766720
 
 def construct_embed(game_name, price_info, app_id, reason="sale", threshold=None,
-                    is_historical_low=False, historical_low=None):
+                    is_historical_low=False, historical_low=None, test=False):
     """
     Construct a Discord embed based on the game details.
     reason is "sale" (any discount) or "target" (price fell to the user's threshold).
@@ -35,6 +35,20 @@ def construct_embed(game_name, price_info, app_id, reason="sale", threshold=None
     elif historical_low is not None and price_info.get('final') is not None \
             and historical_low < price_info['final'] / 100:
         description_parts.append(f"Lowest seen: {historical_low:.2f}")
+
+    # Discord shows <t:...> in each reader's own time zone, e.g. "in 5 days"
+    if price_info.get('discount_end'):
+        end = int(price_info['discount_end'])
+        description_parts.append(f"⏰ Sale ends <t:{end}:R> (<t:{end}:f>)")
+
+    if price_info.get('review_label'):
+        review = f"👍 {price_info['review_label']}"
+        if price_info.get('review_percent') is not None:
+            review += f" ({price_info['review_percent']}% of {price_info.get('review_count') or 0:,} reviews)"
+        description_parts.append(review)
+
+    if test:
+        description_parts.insert(0, "🧪 **TEST MESSAGE - this is not a real sale.**")
 
     embed = {
         "title": game_name,
@@ -65,13 +79,13 @@ def post_to_webhook(webhook_url, payload):
 
 def send_discord_notification(game_name, price_info, webhook_url, bot_name, bot_avatar, app_id,
                               reason="sale", threshold=None, is_historical_low=False,
-                              historical_low=None):
+                              historical_low=None, test=False):
     """
     Send a Discord notification about the sale or price target met.
     Returns True only if Discord accepted it, so a failed alert is retried next check.
     """
     embed = construct_embed(game_name, price_info, app_id, reason, threshold,
-                            is_historical_low, historical_low)
+                            is_historical_low, historical_low, test)
     payload = {"embeds": [embed]}
     # Discord rejects an empty username or avatar URL, so only send them when set
     if bot_name:

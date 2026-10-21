@@ -1,7 +1,8 @@
 import time
 import logging
 from saved_games import get_games_with_details, save_price_history, get_historical_low
-from utils import clear_screen, print_header, get_price_info, format_price_line
+from utils import clear_screen, print_header, format_price_line, format_sale_end
+from steam_api import get_prices
 from stop_spam import save_sale_reminder, should_notify, is_sale_notified, remove_expired_sale
 from notifier import send_discord_notification
 
@@ -37,6 +38,8 @@ def check_game(game, price_info, settings, mode):
     if not price_info or price_info.get('final') is None:
         if price_info and price_info.get('is_free'):
             print("\033[1;32mFree to play - nothing to watch.\033[0m")
+        elif price_info:
+            print(f"\033[1;33m{format_price_line(price_info)}.\033[0m")
         else:
             print(f"\033[1;31m[ERROR] Price information not available for '{game_name}'.\033[0m")
         return False
@@ -52,6 +55,8 @@ def check_game(game, price_info, settings, mode):
     save_price_history(game_id, app_id, current_price, discount_percent, country_code)
 
     print(f"\033[1;32mCurrent Price: {format_price_line(price_info)}\033[0m")
+    if price_info.get('discount_end'):
+        print(f"\033[1;35mSale ends: {format_sale_end(price_info['discount_end'])}\033[0m")
     if is_historical_low:
         print(f"\033[1;33m⭐ LOWEST PRICE EVER! ⭐\033[0m")
 
@@ -101,10 +106,11 @@ def check_game(game, price_info, settings, mode):
     return sent
 
 def check_games(games, settings, mode):
-    """Check every game once."""
+    """Check every game once (one Steam request per 50 games)."""
+    print(f"\033[1;33mFetching prices for {len(games)} game(s) from Steam...\033[0m")
+    prices = get_prices([g['app_id'] for g in games], settings['country_code'], settings['language'])
     for game in games:
-        print("\033[1;33mFetching game details from Steam API...\033[0m")
-        price_info = get_price_info(game['app_id'], settings['country_code'], settings['language'])
+        price_info = prices.get(str(game['app_id']))
         try:
             check_game(game, price_info, settings, mode)
         except Exception as e:
@@ -112,19 +118,27 @@ def check_games(games, settings, mode):
             print(f"\033[1;31m[ERROR] Could not check '{game['name']}': {e}\033[0m")
         print("-------------------------------------------------")
 
+def check_interval(settings):
+    """Seconds between checks: the user's setting (minutes), never faster than every 10 minutes."""
+    try:
+        return max(10, int(settings.get('check_interval_minutes', SLEEP_TIME // 60))) * 60
+    except (TypeError, ValueError):
+        return SLEEP_TIME
+
 def scan_loop(games, settings, mode):
-    """Check the games every hour until the user presses Ctrl+C."""
+    """Check the games on a timer until the user presses Ctrl+C."""
+    interval = check_interval(settings)
     clear_screen()
     print_header("🕵️‍♂️ Scanning in Progress 🕵️‍♂️")
     names = ", ".join(f"'{g['name']}'" for g in games)
-    print(f"\n\033[1;32mScanning {names} for sales every hour...\033[0m")
+    print(f"\n\033[1;32mScanning {names} for sales every {interval // 60} minutes...\033[0m")
     print("Press Ctrl+C to stop scanning and return to the menu.")
     print("-------------------------------------------------")
     try:
         while True:
             check_games(games, settings, mode)
-            print(f"Sleeping for {SLEEP_TIME // 60} minutes before checking again...\n")
-            time.sleep(SLEEP_TIME)
+            print(f"Sleeping for {interval // 60} minutes before checking again...\n")
+            time.sleep(interval)
     except KeyboardInterrupt:
         print("\nScanning stopped. Returning to menu...")
 
