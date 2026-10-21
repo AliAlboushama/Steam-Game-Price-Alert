@@ -1,4 +1,5 @@
 import re
+import json
 import sqlite3
 import logging
 from paths import data_path
@@ -6,8 +7,11 @@ from paths import data_path
 DB_NAME = data_path("saved_games.db")
 
 def _app_id_from_link(game_link):
-    match = re.search(r'/app/(\d+)', game_link or "")
-    return match.group(1) if match else None
+    match = re.search(r'/(app|sub|bundle)/(\d+)', game_link or "")
+    if not match:
+        return None
+    kind, number = match.groups()
+    return number if kind == "app" else f"{kind}:{number}"
 
 def initialize_database():
     """Initialize the SQLite database for storing games and price thresholds."""
@@ -52,12 +56,30 @@ def initialize_database():
             history_columns = [row[1] for row in cursor.execute("PRAGMA table_info(price_history)")]
             if 'country_code' not in history_columns:
                 cursor.execute("ALTER TABLE price_history ADD COLUMN country_code TEXT")
+            # Where a game came from: NULL = added by hand, 'wishlist' = wishlist import/sync
+            if 'source' not in game_columns:
+                cursor.execute("ALTER TABLE games ADD COLUMN source TEXT")
+            # Discord messages we sent, so an alert can be edited later (sale ended, cheaper now)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS messages (
+                    message_id TEXT PRIMARY KEY,
+                    embeds TEXT NOT NULL,
+                    created DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            # Steam id -> IsThereAnyDeal id, looked up once
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS itad_ids (
+                    steam_key TEXT PRIMARY KEY,
+                    itad_id TEXT
+                )
+            ''')
             conn.commit()
     except sqlite3.Error as e:
         logging.error(f"Database initialization error: {e}")
         raise
 
-def add_game(game_name, game_link, app_id=None):
+def add_game(game_name, game_link, app_id=None, source=None):
     """Add a new game to the database. Returns False if the game is already saved."""
     app_id = str(app_id or _app_id_from_link(game_link) or "")
     try:
@@ -65,8 +87,8 @@ def add_game(game_name, game_link, app_id=None):
             cursor = conn.cursor()
             if app_id and cursor.execute("SELECT 1 FROM games WHERE app_id = ?", (app_id,)).fetchone():
                 return False
-            cursor.execute("INSERT INTO games (game_name, game_link, app_id) VALUES (?, ?, ?)",
-                           (game_name, game_link, app_id or None))
+            cursor.execute("INSERT INTO games (game_name, game_link, app_id, source) VALUES (?, ?, ?, ?)",
+                           (game_name, game_link, app_id or None, source))
             conn.commit()
         logging.info(f"Game '{game_name}' added (app_id: {app_id})")
         return True
@@ -92,12 +114,12 @@ def get_games_with_details(game_ids=None):
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
             rows = cursor.execute(
-                "SELECT id, game_name, app_id, price_threshold, game_link FROM games").fetchall()
+                "SELECT id, game_name, app_id, price_threshold, game_link, source FROM games").fetchall()
     except sqlite3.Error as e:
         logging.error(f"Error retrieving games: {e}")
         return []
     games = [{'id': r[0], 'name': r[1], 'app_id': r[2] or _app_id_from_link(r[4]),
-              'threshold': r[3]} for r in rows]
+              'threshold': r[3], 'source': r[5]} for r in rows]
     if game_ids is not None:
         wanted = set(game_ids)
         games = [g for g in games if g['id'] in wanted]
@@ -206,6 +228,70 @@ def is_lowest_ever(game_id, app_id, price, discount_percent, country_code=None):
         logging.error(f"Error checking lowest price for game ID {game_id}: {e}")
         return False
     return low is not None and price <= low + 0.001 and high > price + 0.001
+
+def remove_wishlist_games_not_in(app_ids):
+    """
+    Remove games that came from the wishlist but aren't on it any more (bought or
+    un-wishlisted). Games added by hand are never touched. Returns the removed names.
+    """
+    keep = {str(a) for a in app_ids}
+    if not keep:
+        return []  # an empty list usually means private/failed - never wipe on that
+    removed = []
+    for game in get_games_with_details():
+        if game.get('source') == 'wishlist' and str(game['app_id']) not in keep:
+            remove_game(game['id'])
+            removed.append(game['name'])
+    return removed
+
+def save_message(message_id, embeds):
+    """Remember a Discord message's embeds so it can be edited later."""
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            conn.execute("INSERT OR REPLACE INTO messages (message_id, embeds) VALUES (?, ?)",
+                         (str(message_id), json.dumps(embeds)))
+    except sqlite3.Error as e:
+        logging.error(f"Error saving message {message_id}: {e}")
+
+def get_message(message_id):
+    """The saved embeds of a Discord message, or None."""
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            row = conn.execute("SELECT embeds FROM messages WHERE message_id = ?",
+                               (str(message_id),)).fetchone()
+        return json.loads(row[0]) if row else None
+    except (sqlite3.Error, ValueError) as e:
+        logging.error(f"Error reading message {message_id}: {e}")
+        return None
+
+def delete_message(message_id):
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            conn.execute("DELETE FROM messages WHERE message_id = ?", (str(message_id),))
+    except sqlite3.Error as e:
+        logging.error(f"Error deleting message {message_id}: {e}")
+
+def get_itad_ids(steam_keys):
+    """Cached IsThereAnyDeal ids: {steam_key: itad_id or None} for keys we've looked up before."""
+    if not steam_keys:
+        return {}
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            marks = ",".join("?" * len(steam_keys))
+            rows = conn.execute(f"SELECT steam_key, itad_id FROM itad_ids WHERE steam_key IN ({marks})",
+                                list(steam_keys)).fetchall()
+        return dict(rows)
+    except sqlite3.Error as e:
+        logging.error(f"Error reading IsThereAnyDeal ids: {e}")
+        return {}
+
+def save_itad_ids(mapping):
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            conn.executemany("INSERT OR REPLACE INTO itad_ids (steam_key, itad_id) VALUES (?, ?)",
+                             list(mapping.items()))
+    except sqlite3.Error as e:
+        logging.error(f"Error saving IsThereAnyDeal ids: {e}")
 
 def get_price_history(game_id, app_id, limit=10):
     """Get recent price history for a game."""
