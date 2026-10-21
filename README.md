@@ -80,7 +80,7 @@ This project requires **Python 3.7+** and the following packages:
 1. Clone the repository:
 ```bash
 git clone https://github.com/UnboundFate/Steam-Game-Price-Alert.git
-cd Steam-Game-Price-Alert
+cd Steam-Game-Price-Alert/Steam-Game-Price-Alert
 ```
 
 2. Install required packages:
@@ -174,7 +174,8 @@ You can customize:
 Steam-Game-Price-Alert/
 ├── main.py              # Main application entry point
 ├── scanner.py           # Scanning functions for single/multiple games
-├── discord.py           # Discord webhook notification handler
+├── notifier.py          # Discord webhook notification handler
+├── paths.py             # Where data files are stored
 ├── saved_games.py       # Database operations for games and price history
 ├── saved_info.py        # User settings management
 ├── stop_spam.py         # Sale notification tracking (prevents duplicates)
