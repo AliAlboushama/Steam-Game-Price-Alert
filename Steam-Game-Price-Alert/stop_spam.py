@@ -35,14 +35,17 @@ def _write_sale_reminders(sale_reminders):
         json.dump(sale_reminders, file, indent=4)
     os.replace(tmp_file, SALE_REMINDER_FILE)
 
-def save_sale_reminder(app_id, game_name, current_price, discount_percent):
-    """Save a sale reminder to sale_reminder.json."""
+def save_sale_reminder(app_id, game_name, current_price, discount_percent,
+                       message_id=None, embed_index=None):
+    """Save a sale reminder (and which Discord message the alert is in) to sale_reminder.json."""
     try:
         sale_reminders = load_sale_reminders()
         sale_reminders[str(app_id)] = {
             "game_name": game_name,
             "current_price": current_price,
-            "discount_percent": discount_percent
+            "discount_percent": discount_percent,
+            "message_id": message_id,
+            "embed_index": embed_index,
         }
         _write_sale_reminders(sale_reminders)
         logging.info(f"Sale reminder saved for {game_name} (app_id: {app_id})")
@@ -52,6 +55,10 @@ def save_sale_reminder(app_id, game_name, current_price, discount_percent):
     except Exception as e:
         logging.error(f"Unexpected error saving sale reminder: {e}")
         print(f"\033[1;31m[ERROR] Unexpected error saving sale reminder: {e}\033[0m")
+
+def get_sale_reminder(app_id):
+    """The saved reminder for a game, or None."""
+    return load_sale_reminders().get(str(app_id))
 
 def is_sale_notified(app_id):
     """Check if a sale has already been notified."""

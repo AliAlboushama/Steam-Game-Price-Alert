@@ -3,8 +3,6 @@ import logging
 import re
 from datetime import datetime
 from urllib.parse import urlparse
-from pyfiglet import Figlet
-from saved_games import get_all_games as _get_all_games
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Steam-Game-Price-Alert)"}
 
@@ -18,35 +16,25 @@ STEAM_LANGUAGES = {
     "sv": "swedish", "th": "thai", "tr": "turkish", "uk": "ukrainian", "vi": "vietnamese",
 }
 
-# Re-export get_all_games from saved_games to avoid duplication
-def get_all_games():
-    """Retrieve all games from the database."""
-    return _get_all_games()
-
-def clear_screen():
-    """Clears the screen for better readability (plain escape code, no `clear` process needed)."""
-    print("\033[2J\033[H", end="", flush=True)
-
-def print_header(title):
-    """Prints a header with a cool design using ASCII art."""
-    f = Figlet(font='slant')
-    print("\033[1;34m" + f.renderText(title) + "\033[0m")
-
 def steam_language(language):
     """Turn a saved language code ("en", "de") into the name Steam understands ("english")."""
     language = (language or "en").lower()
     return STEAM_LANGUAGES.get(language, language)
 
 def extract_app_id(game_link):
-    """Extract the APP_ID from a Steam game link (or a bare app id)."""
+    """
+    Extract the item id from a Steam store link (or a bare app id):
+    /app/N -> "N", /sub/N -> "sub:N", /bundle/N -> "bundle:N".
+    """
     if not game_link:
         return None
     game_link = str(game_link).strip()
     if game_link.isdigit():
         return game_link
-    match = re.search(r'/app/(\d+)', game_link)
+    match = re.search(r'/(app|sub|bundle)/(\d+)', game_link)
     if match:
-        return match.group(1)
+        kind, number = match.groups()
+        return number if kind == "app" else f"{kind}:{number}"
     logging.error(f"Invalid game link: {game_link}")
     return None
 
@@ -215,6 +203,6 @@ def validate_steam_link(steam_link):
         host = (parsed.hostname or "").lower()
         return (parsed.scheme in ['http', 'https'] and
                 (host == 'steampowered.com' or host.endswith('.steampowered.com')) and
-                re.search(r'/app/\d+', parsed.path) is not None)
+                re.search(r'/(app|sub|bundle)/\d+', parsed.path) is not None)
     except Exception:
         return False
