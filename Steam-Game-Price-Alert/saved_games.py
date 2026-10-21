@@ -188,6 +188,25 @@ def get_historical_low(game_id, app_id, country_code=None):
         logging.error(f"Error retrieving historical low for game ID {game_id}: {e}")
         return None
 
+def is_lowest_ever(game_id, app_id, price, discount_percent, country_code=None):
+    """
+    True if a discounted price matches or beats every price recorded before.
+    Call it BEFORE saving the current price. We also need to have seen a higher
+    price at some point - a game first seen mid-sale has nothing to compare against.
+    """
+    if discount_percent <= 0:
+        return False
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            low, high = conn.execute('''
+                SELECT MIN(price), MAX(price) FROM price_history
+                WHERE game_id = ? AND app_id = ? AND (country_code = ? OR country_code IS NULL)
+            ''', (game_id, str(app_id), country_code)).fetchone()
+    except sqlite3.Error as e:
+        logging.error(f"Error checking lowest price for game ID {game_id}: {e}")
+        return False
+    return low is not None and price <= low + 0.001 and high > price + 0.001
+
 def get_price_history(game_id, app_id, limit=10):
     """Get recent price history for a game."""
     try:

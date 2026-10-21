@@ -1,6 +1,6 @@
 import time
 import logging
-from saved_games import get_games_with_details, save_price_history, get_historical_low
+from saved_games import get_games_with_details, save_price_history, get_historical_low, is_lowest_ever
 from utils import clear_screen, print_header, format_price_line, format_sale_end
 from steam_api import get_prices
 from stop_spam import save_sale_reminder, should_notify, is_sale_notified, remove_expired_sale
@@ -51,8 +51,7 @@ def check_game(game, price_info, settings, mode):
     # Compare against the lowest price seen BEFORE this check, otherwise the current
     # price is always "the lowest ever" (it was just saved)
     previous_low = get_historical_low(game_id, app_id, country_code)
-    is_historical_low = (discount_percent > 0 and previous_low is not None
-                         and current_price <= previous_low)
+    is_historical_low = is_lowest_ever(game_id, app_id, current_price, discount_percent, country_code)
     save_price_history(game_id, app_id, current_price, discount_percent, country_code)
 
     print(f"\033[1;32mCurrent Price: {format_price_line(price_info)}\033[0m")

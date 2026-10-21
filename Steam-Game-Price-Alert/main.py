@@ -1,6 +1,9 @@
 import sys
+import html
+import shutil
 import logging
 import argparse
+import textwrap
 import background
 from paths import data_path
 from saved_info import load_user_info, save_user_info
@@ -15,7 +18,7 @@ from notifier import send_discord_notification
 from saved_games import (
     initialize_database, add_game as add_game_to_db, remove_game,
     save_price_threshold, get_games_with_details,
-    save_price_history, get_historical_low
+    save_price_history, get_historical_low, is_lowest_ever
 )
 from scanner import scan_for_sales, scan_multiple_games
 
@@ -66,6 +69,11 @@ def get_user_info():
     bot_name = get_user_input(BOT_NAME_PROMPT)
     bot_avatar = get_user_input(BOT_AVATAR_PROMPT)
     return country_code, language, webhook_url, bot_name, bot_avatar
+
+def wrap_text(text, indent="  "):
+    """Wrap long text to the terminal width (max 100 columns) so lines don't break mid-word."""
+    width = min(shutil.get_terminal_size((80, 24)).columns, 100)
+    return textwrap.fill(text, width=width, initial_indent=indent, subsequent_indent=indent)
 
 def pick_game(games, prompt, color="\033[1;33m"):
     """Show a numbered game list and return the chosen game, or None to cancel."""
@@ -275,7 +283,7 @@ def view_current_prices(settings):
             print(f"  Price: \033[1;32m{format_price_line(info)}\033[0m")
             if info.get('discount_end'):
                 print(f"  Sale ends: {format_sale_end(info['discount_end'])}")
-            if info['discount_percent'] > 0 and previous_low is not None and current_price <= previous_low:
+            if is_lowest_ever(game['id'], game['app_id'], current_price, info['discount_percent'], country_code):
                 print(f"  \033[1;33m⭐ LOWEST PRICE EVER! ⭐\033[0m")
             elif previous_low is not None and previous_low < current_price:
                 print(f"  Lowest seen: {previous_low:.2f}")
@@ -327,7 +335,7 @@ def view_detailed_game_info(settings):
         print(f"  Sale ends: {format_sale_end(sale['discount_end'])}")
     if price['final'] is not None:
         historical_low = get_historical_low(game['id'], game['app_id'], settings['country_code'])
-        if historical_low is not None:
+        if historical_low is not None and historical_low < price['final'] / 100:
             print(f"  Lowest seen: {historical_low:.2f}")
 
     # Release date
@@ -345,7 +353,8 @@ def view_detailed_game_info(settings):
 
     # Categories
     if game_info['categories']:
-        print(f"\n\033[1;32m📂 Categories:\033[0m {', '.join(game_info['categories'])}")
+        print(f"\n\033[1;32m📂 Categories:\033[0m")
+        print(wrap_text(', '.join(game_info['categories'])))
 
     # Reviews
     print(f"\n\033[1;32m⭐ Reviews:\033[0m")
@@ -366,10 +375,10 @@ def view_detailed_game_info(settings):
     # Description
     if game_info['short_description']:
         print(f"\n\033[1;32m📝 Description:\033[0m")
-        desc = game_info['short_description']
-        if len(desc) > 200:
-            desc = desc[:200] + "..."
-        print(f"  {desc}")
+        desc = html.unescape(game_info['short_description'])
+        if len(desc) > 300:
+            desc = desc[:300].rsplit(' ', 1)[0] + "..."
+        print(wrap_text(desc))
 
     print("\n" + "=" * 80)
     input("\nPress Enter to return to menu...")

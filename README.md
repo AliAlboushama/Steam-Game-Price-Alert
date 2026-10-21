@@ -21,13 +21,26 @@
 
 ### Runs on its own
 - **Background mode** (`--daemon`) checks all your games on a timer with no menu
-- Ready-made setups for **Docker**, **Linux (systemd)** and **Windows**, so it keeps running after a restart
+- Ready-made setups for **Docker** and **Linux (systemd)**, so it keeps running after a restart
 - **Fast**: one Steam request checks up to 50 games
 
 ## Screenshots
-![Main Page](https://files.catbox.moe/eggd5n.png)
 
-![Scanning Game Sales UI](https://files.catbox.moe/8quot8.png)
+**Main menu**
+
+![Main menu](docs/screenshots/menu.png)
+
+**Background check (`--once`)**: sale end times, lowest-price-ever detection, price targets
+
+![Background check](docs/screenshots/scan.png)
+
+**Current prices** in your store's currency
+
+![Current prices](docs/screenshots/prices.png)
+
+**Game details** with Steam review scores
+
+![Game details](docs/screenshots/details.png)
 
 ## Discord Notification Preview
 
@@ -55,8 +68,6 @@ cd Steam-Game-Price-Alert/Steam-Game-Price-Alert
 pip install -r requirements.txt
 python3 main.py
 ```
-
-On Windows use `python main.py`.
 
 ### First run
 
@@ -109,12 +120,6 @@ python3 main.py --daemon   # check all games forever (Ctrl+C to stop)
 python3 main.py --once     # check all games once and exit (for cron / Task Scheduler)
 ```
 
-### Windows
-
-Double-click `run-in-background.bat`. It runs with no window until you log out or restart.
-To start it automatically when you log in, press `Win+R`, type `shell:startup`, and put a shortcut to `run-in-background.bat` in that folder.
-To stop it: Task Manager → Details → end `pythonw.exe`.
-
 ### Linux (systemd)
 
 ```bash
@@ -159,7 +164,6 @@ Steam-Game-Price-Alert/
 ├── stop_spam.py            # Remembers which sales were already sent
 ├── utils.py                # Helpers: links, validation, formatting
 ├── paths.py                # Where data files are stored
-├── run-in-background.bat   # Windows background start
 └── requirements.txt
 
 Created automatically (never commit these, they hold your webhook):
@@ -184,7 +188,7 @@ A: It isn't released yet. Keep it in your list; you'll get an alert if it launch
 A: The bot saves every price change it sees. When a sale matches or beats the lowest one it has recorded, the alert is highlighted. It only knows the prices it has seen itself.
 
 **Q: Will the bot keep working after I restart my computer?**
-A: Only in background mode with one of the setups above (Windows startup shortcut, systemd or Docker). Your games and settings are always kept.
+A: Yes, in background mode with systemd or Docker (both restart it automatically). Your games and settings are always kept.
 
 **Q: I'm upgrading from v1.x. Do I lose my games?**
 A: No. Your database is upgraded automatically the first time v2 starts.
