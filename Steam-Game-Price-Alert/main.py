@@ -5,8 +5,10 @@ from utils import (
     get_all_games, extract_app_id, get_game_details, get_detailed_game_info,
     validate_country_code, validate_language_code,
     validate_webhook_url, validate_steam_link,
-    clear_screen, print_header, price_from_details, format_price_line
+    clear_screen, print_header, format_price_line, format_sale_end
 )
+from steam_api import get_prices, get_store_items, search_games, resolve_steam_id, get_wishlist
+from notifier import send_discord_notification
 from saved_games import (
     initialize_database, add_game as add_game_to_db, remove_game,
     save_price_threshold, get_games_with_details,
@@ -106,8 +108,10 @@ def main_menu():
         print_option("5. Set price threshold")
         print_option("6. View current prices")
         print_option("7. View detailed game info")
+        print_option("8. Import my Steam wishlist")
+        print_option("9. Settings (and send a test notification)")
         print_option("0. Exit")
-        choice = get_user_input("\033[1;36mEnter a number (0-7): \033[0m")
+        choice = get_user_input("\033[1;36mEnter a number (0-9): \033[0m")
         if choice == "1":
             scan_for_sales(settings)
         elif choice == "2":
@@ -122,6 +126,10 @@ def main_menu():
             view_current_prices(settings)
         elif choice == "7":
             view_detailed_game_info(settings)
+        elif choice == "8":
+            import_wishlist(settings)
+        elif choice == "9":
+            settings_menu(settings)
         elif choice == "0":
             print("\nBye!")
             return
@@ -129,23 +137,41 @@ def main_menu():
             print("\n\033[1;31mInvalid option. Try again!\033[0m\n")
             input("Press Enter to continue...")
 
+def search_and_pick(term, settings):
+    """Search the Steam store by name and let the user pick a result. Returns an app id or None."""
+    print("\033[1;33mSearching Steam...\033[0m")
+    results = search_games(term, settings['country_code'], settings['language'])
+    if not results:
+        print(f"\033[1;31mNo games found for '{term}'.\033[0m")
+        return None
+    print(f"\n\033[1;36mResults for '{term}':\033[0m")
+    picked = pick_game([{'name': f"{name}  (app {app_id})", 'app_id': app_id} for app_id, name in results],
+                       "Enter the number of the right game")
+    return picked['app_id'] if picked else None
+
 def add_game(settings):
     """Handles adding a new game with an option to add more or return."""
     while True:
         clear_screen()
         print_header("Add a New Game")
-        steam_link = get_user_input("Enter Steam game link (or 0 to cancel): ")
+        steam_link = get_user_input("Enter a Steam link, app id, or game name to search (or 0 to cancel): ")
         if steam_link == "0":
             break
         if not steam_link:
-            print("\033[1;31mSteam link cannot be empty.\033[0m")
+            print("\033[1;31mThis cannot be empty.\033[0m")
             input("Press Enter to try again...")
             continue
-        if not (steam_link.isdigit() or validate_steam_link(steam_link)):
+        if steam_link.isdigit() or validate_steam_link(steam_link):
+            app_id = extract_app_id(steam_link)
+        elif steam_link.lower().startswith(("http://", "https://", "www.")):
             print("\033[1;31mInvalid Steam link format. Please provide a valid Steam store link (e.g., https://store.steampowered.com/app/123456/).\033[0m")
             input("Press Enter to try again...")
             continue
-        app_id = extract_app_id(steam_link)
+        else:
+            app_id = search_and_pick(steam_link, settings)
+            if not app_id:
+                input("Press Enter to try again...")
+                continue
         if not app_id:
             print("\033[1;31mCould not extract app ID from Steam link. Please provide a valid Steam store link.\033[0m")
             input("Press Enter to try again...")
@@ -235,14 +261,17 @@ def view_current_prices(settings):
     print("\n\033[1;33mFetching current prices...\033[0m\n")
     print("-" * 80)
     country_code = settings['country_code']
+    prices = get_prices([g['app_id'] for g in games], country_code, settings['language'])
 
     for game in games:
         print(f"\033[1;36m{game['name']}\033[0m")
-        info = price_from_details(get_game_details(game['app_id'], country_code, settings['language']))
+        info = prices.get(str(game['app_id']))
         if info and info['final'] is not None:
             current_price = info['final'] / 100
             previous_low = get_historical_low(game['id'], game['app_id'], country_code)
             print(f"  Price: \033[1;32m{format_price_line(info)}\033[0m")
+            if info.get('discount_end'):
+                print(f"  Sale ends: {format_sale_end(info['discount_end'])}")
             if info['discount_percent'] > 0 and previous_low is not None and current_price <= previous_low:
                 print(f"  \033[1;33m⭐ LOWEST PRICE EVER! ⭐\033[0m")
             elif previous_low is not None and previous_low < current_price:
@@ -250,8 +279,8 @@ def view_current_prices(settings):
             if game['threshold'] is not None:
                 print(f"  Your target: {game['threshold']:.2f}")
             save_price_history(game['id'], game['app_id'], current_price, info['discount_percent'], country_code)
-        elif info and info['is_free']:
-            print(f"  \033[1;32mFree to play\033[0m")
+        elif info:
+            print(f"  \033[1;33m{format_price_line(info)}\033[0m")
         else:
             print(f"  \033[1;31mPrice information not available\033[0m")
         print("-" * 80)
@@ -290,6 +319,9 @@ def view_detailed_game_info(settings):
     price = game_info['price']
     print(f"\n\033[1;32m💰 Price Information:\033[0m")
     print(f"  Current: \033[1;32m{format_price_line(price)}\033[0m")
+    sale = get_store_items([game['app_id']], settings['country_code'], settings['language']).get(str(game['app_id']))
+    if sale and sale.get('discount_end'):
+        print(f"  Sale ends: {format_sale_end(sale['discount_end'])}")
     if price['final'] is not None:
         historical_low = get_historical_low(game['id'], game['app_id'], settings['country_code'])
         if historical_low is not None:
@@ -338,6 +370,156 @@ def view_detailed_game_info(settings):
 
     print("\n" + "=" * 80)
     input("\nPress Enter to return to menu...")
+
+def save_settings(settings):
+    """Write the settings dict (including any extra options) back to user_info.json."""
+    extra = {k: v for k, v in settings.items()
+             if k not in ("country_code", "language", "webhook_url", "bot_name", "bot_avatar")}
+    save_user_info(settings['country_code'], settings['language'], settings['webhook_url'],
+                   settings['bot_name'], settings['bot_avatar'], **extra)
+
+def import_wishlist(settings):
+    """Add every game on a public Steam wishlist to the watchlist."""
+    clear_screen()
+    print_header("Import Wishlist")
+    print("\033[1;36mYour wishlist must be public: Steam > Profile > Edit Profile > "
+          "Privacy Settings > Game details = Public.\033[0m\n")
+    saved = settings.get('wishlist_profile')
+    prompt = "Enter your Steam profile link, custom URL name or SteamID64"
+    if saved:
+        prompt += f" (Enter = {saved})"
+    profile = get_user_input(prompt + ", or 0 to cancel: ") or saved or ""
+    if not profile or profile == "0":
+        return
+
+    print("\033[1;33mLooking up your profile...\033[0m")
+    steam_id = resolve_steam_id(profile)
+    if not steam_id:
+        print("\033[1;31mCould not find that Steam profile. Try the full link to your profile.\033[0m")
+        input("\nPress Enter to return to menu...")
+        return
+    app_ids = get_wishlist(steam_id)
+    if app_ids is None:
+        print("\033[1;31mCould not reach Steam. Please try again later.\033[0m")
+        input("\nPress Enter to return to menu...")
+        return
+    if not app_ids:
+        print("\033[1;31mThe wishlist is empty or private.\033[0m")
+        input("\nPress Enter to return to menu...")
+        return
+
+    existing = {str(g['app_id']) for g in get_games_with_details()}
+    new_ids = [a for a in app_ids if a not in existing]
+    print(f"\nFound \033[1;32m{len(app_ids)}\033[0m games on the wishlist, "
+          f"\033[1;32m{len(new_ids)}\033[0m not in your list yet.")
+    settings['wishlist_profile'] = profile
+    save_settings(settings)
+    if not new_ids:
+        input("\nPress Enter to return to menu...")
+        return
+
+    print("\033[1;33mLooking up names...\033[0m")
+    items = get_store_items(new_ids, settings['country_code'], settings['language'])
+    to_add = [(a, items[a]['name']) for a in new_ids if a in items]
+    skipped = len(new_ids) - len(to_add)
+    for app_id, name in to_add:
+        print(f"\033[1;32m  + {name}\033[0m")
+    if skipped:
+        print(f"\033[1;33m  ({skipped} game(s) skipped - not sold in your store or removed from Steam)\033[0m")
+    if not to_add or get_user_input(f"\nAdd these {len(to_add)} games? (y/n): ").lower() != "y":
+        return
+    added = sum(1 for app_id, name in to_add
+                if add_game_to_db(name, f"https://store.steampowered.com/app/{app_id}/", app_id))
+    print(f"\n\033[1;32m[OK] Added {added} games.\033[0m")
+    input("\nPress Enter to return to menu...")
+
+def send_test_notification(settings):
+    """Demo mode: send a clearly-marked TEST alert through the real Discord code, using a real price."""
+    # Use one of your games that is really on sale right now, so the test looks like a real alert
+    app_ids = [str(g['app_id']) for g in get_games_with_details()] or ["1091500"]
+    prices = get_prices(app_ids, settings['country_code'], settings['language'])
+    priced = [(a, prices[a]) for a in app_ids if a in prices and prices[a].get('final') is not None]
+    on_sale = [(a, p) for a, p in priced if p.get('discount_percent', 0) > 0]
+    if on_sale:
+        app_id, info = on_sale[0]
+        reason, threshold = "sale", None
+    elif priced:
+        # Nothing on sale: show it as a price-target alert at today's price
+        app_id, info = priced[0]
+        reason, threshold = "target", info['final'] / 100
+    else:
+        app_id, reason, threshold = "0", "sale", None
+        info = {'name': 'Example Game', 'final': 1999, 'initial': 3999, 'discount_percent': 50,
+                'final_formatted': '19.99', 'initial_formatted': '39.99', 'header_image': ''}
+    print(f"\033[1;33mSending a test message to Discord (using {info['name']})...\033[0m")
+    sent = send_discord_notification(info['name'], info, settings['webhook_url'], settings['bot_name'],
+                                     settings['bot_avatar'], app_id, reason=reason, threshold=threshold,
+                                     test=True)
+    if sent:
+        print("\033[1;32m[OK] Discord accepted the test message - check your channel.\033[0m")
+    else:
+        print("\033[1;31mDiscord did NOT accept the message. Check the webhook URL (details in debug.log).\033[0m")
+
+def settings_menu(settings):
+    """Change saved settings without deleting user_info.json."""
+    while True:
+        clear_screen()
+        print_header("Settings")
+        webhook = settings['webhook_url']
+        masked = webhook[:webhook.find('/api/webhooks/') + 14] + "..." if '/api/webhooks/' in webhook else webhook
+        print(f"\033[1;36m Country:\033[0m {settings['country_code']}    "
+              f"\033[1;36mLanguage:\033[0m {settings['language']}")
+        print(f"\033[1;36m Webhook:\033[0m {masked}")
+        print(f"\033[1;36m Bot name:\033[0m {settings['bot_name'] or '(Discord default)'}    "
+              f"\033[1;36mAvatar:\033[0m {settings['bot_avatar'] or '(Discord default)'}")
+        print(f"\033[1;36m Check every:\033[0m {settings.get('check_interval_minutes', 60)} minutes\n")
+        print_option("1. Change country")
+        print_option("2. Change language")
+        print_option("3. Change Discord webhook")
+        print_option("4. Change bot name")
+        print_option("5. Change bot avatar")
+        print_option("6. Change how often to check")
+        print_option("7. Send a test notification")
+        print_option("0. Back")
+        choice = get_user_input("\033[1;36mEnter a number (0-7): \033[0m")
+        if choice == "0":
+            return
+        if choice == "1":
+            value = get_user_input(COUNTRY_CODE_PROMPT).upper()
+            if not validate_country_code(value):
+                print("\033[1;31mInvalid country code.\033[0m")
+            else:
+                settings['country_code'] = value
+        elif choice == "2":
+            value = get_user_input(LANGUAGE_PROMPT).lower()
+            if not validate_language_code(value):
+                print("\033[1;31mInvalid language code.\033[0m")
+            else:
+                settings['language'] = value
+        elif choice == "3":
+            value = get_user_input(WEBHOOK_URL_PROMPT)
+            if not validate_webhook_url(value):
+                print("\033[1;31mInvalid webhook URL.\033[0m")
+            else:
+                settings['webhook_url'] = value
+        elif choice == "4":
+            settings['bot_name'] = get_user_input(BOT_NAME_PROMPT)
+        elif choice == "5":
+            settings['bot_avatar'] = get_user_input(BOT_AVATAR_PROMPT)
+        elif choice == "6":
+            value = get_user_input("Check every how many minutes? (10 or more, default 60): ")
+            if not value.isdigit() or int(value) < 10:
+                print("\033[1;31mPlease enter a whole number of 10 or more.\033[0m")
+            else:
+                settings['check_interval_minutes'] = int(value)
+        elif choice == "7":
+            send_test_notification(settings)
+            input("\nPress Enter to continue...")
+            continue
+        else:
+            print("\033[1;31mInvalid option.\033[0m")
+        save_settings(settings)
+        input("Press Enter to continue...")
 
 if __name__ == "__main__":
     setup_logging()
