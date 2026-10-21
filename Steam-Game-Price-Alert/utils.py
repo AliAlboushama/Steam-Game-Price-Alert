@@ -1,4 +1,3 @@
-import os
 import requests
 import logging
 import re
@@ -25,8 +24,8 @@ def get_all_games():
     return _get_all_games()
 
 def clear_screen():
-    """Clears the screen for better readability."""
-    os.system('cls' if os.name == 'nt' else 'clear')
+    """Clears the screen for better readability (plain escape code, no `clear` process needed)."""
+    print("\033[2J\033[H", end="", flush=True)
 
 def print_header(title):
     """Prints a header with a cool design using ASCII art."""
