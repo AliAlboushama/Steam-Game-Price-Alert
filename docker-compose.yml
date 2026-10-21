@@ -1,0 +1,15 @@
+# First time:  docker compose run --rm steam-price-alert python main.py   (set up + add games)
+# Then:        docker compose up -d                                      (runs in the background)
+# Logs:        docker compose logs -f
+services:
+  steam-price-alert:
+    build: .
+    container_name: steam-price-alert
+    restart: unless-stopped
+    environment:
+      TZ: Europe/Helsinki   # your time zone, for the times shown in the logs
+    volumes:
+      - steam-alert-data:/data
+
+volumes:
+  steam-alert-data:
