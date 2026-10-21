@@ -2,6 +2,7 @@ import os
 import requests
 import logging
 import re
+from datetime import datetime
 from urllib.parse import urlparse
 from pyfiglet import Figlet
 from saved_games import get_all_games as _get_all_games
@@ -108,10 +109,26 @@ def get_price_info(app_id, country_code, language):
 def format_price_line(info):
     """One line describing a price, e.g. '17,99€ (was 59,99€) - 70% OFF'."""
     if info.get('final') is None:
-        return "Free to play" if info.get('is_free') else "Price not available"
+        if info.get('is_free'):
+            return "Free to play"
+        if info.get('coming_soon'):
+            return "Coming soon - not on sale yet"
+        return "Not sold on Steam right now"
     if info.get('discount_percent', 0) > 0 and info.get('initial_formatted'):
         return f"{info['final_formatted']} (was {info['initial_formatted']}) - {info['discount_percent']}% OFF"
     return info['final_formatted']
+
+def format_sale_end(timestamp):
+    """'Mon 26 Oct 20:00 (in 5 days)' in the computer's local time."""
+    end = datetime.fromtimestamp(int(timestamp))
+    left = end - datetime.now()
+    if left.total_seconds() <= 0:
+        remaining = "ended"
+    elif left.days >= 1:
+        remaining = f"in {left.days} day{'s' if left.days != 1 else ''}"
+    else:
+        remaining = f"in {max(1, left.seconds // 3600)} hour(s)"
+    return f"{end.strftime('%a %d %b %H:%M')} ({remaining})"
 
 def get_review_summary(app_id, language="en"):
     """
