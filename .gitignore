@@ -1,0 +1,13 @@
+# Personal data - user_info.json holds your Discord webhook, never commit it
+user_info.json
+saved_games.db
+sale_reminder.json
+sale_reminder.json.backup
+debug.log
+data/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/

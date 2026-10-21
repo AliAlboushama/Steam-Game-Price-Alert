@@ -1,7 +1,10 @@
 import json
 import logging
+from paths import data_path
 
-def save_user_info(country_code, language, webhook_url, bot_name, bot_avatar):
+USER_INFO_FILE = data_path("user_info.json")
+
+def save_user_info(country_code, language, webhook_url, bot_name, bot_avatar, **extra):
     """
     Save user information to a JSON file.
     """
@@ -13,7 +16,8 @@ def save_user_info(country_code, language, webhook_url, bot_name, bot_avatar):
             "bot_name": bot_name,
             "bot_avatar": bot_avatar
         }
-        with open("user_info.json", "w") as file:
+        user_info.update(extra)
+        with open(USER_INFO_FILE, "w") as file:
             json.dump(user_info, file, indent=4)
         print("User information saved successfully.")
     except IOError as e:
@@ -30,7 +34,7 @@ def load_user_info():
     Load user information from the JSON file.
     """
     try:
-        with open("user_info.json", "r") as file:
+        with open(USER_INFO_FILE, "r") as file:
             user_info = json.load(file)
             # Validate required fields
             required_fields = ["country_code", "language", "webhook_url", "bot_name", "bot_avatar"]
