@@ -1,127 +1,162 @@
 import time
 import logging
+from rich.text import Text
+import ui
 from saved_games import get_games_with_details, save_price_history, get_historical_low, is_lowest_ever
-from utils import clear_screen, print_header, format_price_line, format_sale_end
-from steam_api import get_prices
-from stop_spam import save_sale_reminder, should_notify, is_sale_notified, remove_expired_sale
-from notifier import send_discord_notification
+from utils import format_sale_end
+from stop_spam import save_sale_reminder, should_notify, get_sale_reminder, remove_expired_sale
+from steam_api import get_prices, store_url
+from itad import get_steam_lows
+from notifier import send_alerts, edit_alert
 
 SLEEP_TIME = 3600  # 1 hour
 
-MODE_TARGET = "1"  # notify when price drops to the user's threshold
-MODE_SALE = "2"    # notify for any discount
+MODE_TARGET = "1"   # notify when price drops to the user's threshold
+MODE_SALE = "2"     # notify for any discount
 MODE_AUTO = "auto"  # background mode: price target if the game has one, otherwise any discount
 
 def choose_mode():
     """Ask which scanning mode to use. Returns MODE_TARGET, MODE_SALE or None."""
-    clear_screen()
-    print_header("🔍 Choose Scanning Mode 🔍")
-    print("\n\033[1;36mChoose scanning mode:\033[0m")
-    print("\033[0;33m 1. Use price target (notify when price drops below a threshold)\033[0m")
-    print("\033[0;33m 2. Detect sales normally (notify for any discount)\033[0m")
+    ui.header("Scan mode")
+    ui.menu([("1", "Price target - alert when the price drops to your target"),
+             ("2", "Any sale - alert whenever the game is discounted"),
+             ("0", "Cancel")])
     while True:
-        mode_choice = input("\n\033[1;36mEnter a number (1-2, or 0 to cancel): \033[0m").strip()
-        if mode_choice in (MODE_TARGET, MODE_SALE):
-            return mode_choice
-        if mode_choice == "0":
+        choice = ui.ask("Choose: ")
+        if choice in (MODE_TARGET, MODE_SALE):
+            return choice
+        if choice == "0":
             return None
-        print("\033[1;31mPlease enter 1 or 2.\033[0m")
+        ui.error("Please enter 1 or 2.")
 
-def check_game(game, price_info, settings, mode):
+def _evaluate(game, info, settings, mode, steam_low, steam_failed):
     """
-    Check one game's price, print it, record it, and send a Discord alert if it qualifies.
-    Returns True if an alert was sent.
+    Decide what to do about one game. Returns (row, alert, ended_reminder):
+    row = (price Text, discount Text, result Text) for the table,
+    alert = dict to send (or None), ended_reminder = old alert to mark as ended (or None).
     """
-    game_id, game_name, app_id = game['id'], game['name'], game['app_id']
+    game_id, item_id = game['id'], str(game['app_id'])
     country_code = settings['country_code']
 
-    print(f"\n\033[1;36mGame: {game_name}\033[0m")
-    if not price_info or price_info.get('final') is None:
-        if price_info and price_info.get('is_free'):
-            print("\033[1;32mFree to play - nothing to watch.\033[0m")
-        elif price_info:
-            print(f"\033[1;33m{format_price_line(price_info)}.\033[0m")
-        else:
-            print(f"\033[1;31m[ERROR] Price information not available for '{game_name}'.\033[0m")
-        return False
+    if not info or info.get('final') is None:
+        if steam_failed and not info:
+            return (Text("-"), Text(""), Text("Steam unreachable", style="bad")), None, None
+        return (ui.price_text(info), Text(""), Text("Nothing to watch", style="muted")), None, None
 
-    current_price = price_info['final'] / 100
-    discount_percent = price_info['discount_percent']
+    current_price = info['final'] / 100
+    discount = info.get('discount_percent', 0)
 
-    # Compare against the lowest price seen BEFORE this check, otherwise the current
-    # price is always "the lowest ever" (it was just saved)
-    previous_low = get_historical_low(game_id, app_id, country_code)
-    is_historical_low = is_lowest_ever(game_id, app_id, current_price, discount_percent, country_code)
-    save_price_history(game_id, app_id, current_price, discount_percent, country_code)
-
-    print(f"\033[1;32mCurrent Price: {format_price_line(price_info)}\033[0m")
-    if price_info.get('discount_end'):
-        print(f"\033[1;35mSale ends: {format_sale_end(price_info['discount_end'])}\033[0m")
-    if is_historical_low:
-        print(f"\033[1;33m⭐ LOWEST PRICE EVER! ⭐\033[0m")
+    # Lowest ever: IsThereAnyDeal's real Steam low if we have it, otherwise our own history
+    # (checked BEFORE saving today's price, or today's price would always be "the lowest")
+    local_low = get_historical_low(game_id, item_id, country_code)
+    if steam_low:
+        lowest_ever = discount > 0 and current_price <= steam_low['price'] + 0.001
+    else:
+        lowest_ever = is_lowest_ever(game_id, item_id, current_price, discount, country_code)
+    save_price_history(game_id, item_id, current_price, discount, country_code)
 
     threshold = game.get('threshold')
     if mode == MODE_AUTO:
         mode = MODE_TARGET if threshold is not None else MODE_SALE
+    min_discount = int(settings.get('min_discount_percent', 0) or 0)
+
     if mode == MODE_TARGET:
         if threshold is None:
-            print("\033[1;33mNo price target set for this game (use 'Set price threshold').\033[0m")
-            return False
-        qualifies, reason = current_price <= threshold, "target"
+            result = Text("No target set", style="muted")
+            qualifies = False
+        else:
+            qualifies = current_price <= threshold
+            result = Text(f"Target {threshold:.2f} not met", style="muted")
+        reason = "target"
     else:
-        qualifies, reason = discount_percent > 0, "sale"
+        reason = "sale"
+        qualifies = discount > 0 and discount >= min_discount
+        if qualifies and settings.get('alert_only_at_lowest') and steam_low and not lowest_ever:
+            qualifies = False
+            result = Text("Not the all-time low", style="muted")
+        elif discount > 0 and not qualifies:
+            result = Text(f"Below {min_discount}% minimum", style="muted")
+        else:
+            result = Text("No sale", style="muted")
 
+    reminder = get_sale_reminder(item_id)
     if not qualifies:
-        print("Price target not met." if mode == MODE_TARGET else "No sale detected.")
-        if is_sale_notified(app_id):
-            print("Deal has ended. Removing from sale reminders...")
-            remove_expired_sale(app_id)
-        return False
+        # Only call it "ended" when the deal is really over, not when a setting filtered it out
+        deal_active = discount > 0 or (threshold is not None and current_price <= threshold)
+        return (ui.price_text(info), ui.discount_badge(discount), result), None, \
+            (reminder if not deal_active else None)
 
-    if not should_notify(app_id, current_price):
-        print("Deal already notified. Skipping notification.")
-        return False
+    if not should_notify(item_id, current_price):
+        return (ui.price_text(info), ui.discount_badge(discount), Text("Already sent", style="muted")), None, None
 
-    if reason == "target":
-        print(f"\033[1;31mPrice target met! {price_info['final_formatted']} (target {threshold:.2f})\033[0m")
-    else:
-        print(f"\033[1;31mSale detected! {price_info['final_formatted']} ({discount_percent}% off)\033[0m")
+    alert = {
+        'game': game, 'item_id': item_id, 'name': game['name'], 'url': store_url(item_id),
+        'price': info, 'reason': reason, 'threshold': threshold, 'lowest_ever': lowest_ever,
+        'steam_low': steam_low, 'local_low': local_low, 'current_price': current_price,
+        'loud': reason == "target" or lowest_ever, 'previous': reminder,
+    }
+    return (ui.price_text(info), ui.discount_badge(discount), None), alert, None
 
-    sent = send_discord_notification(
-        game_name=game_name,
-        price_info=price_info,
-        webhook_url=settings['webhook_url'],
-        bot_name=settings['bot_name'],
-        bot_avatar=settings['bot_avatar'],
-        app_id=app_id,
-        reason=reason,
-        threshold=threshold,
-        is_historical_low=is_historical_low,
-        historical_low=previous_low,
-    )
-    if sent:
-        save_sale_reminder(app_id, game_name, current_price, discount_percent)
-        print("\033[1;32mDiscord notification sent.\033[0m")
-    else:
-        # Not marked as notified, so the next check tries again
-        print("\033[1;31mDiscord notification FAILED - will retry next check (see debug.log).\033[0m")
-    return sent
+def check_games(games, settings, mode, show=True):
+    """
+    Check every game once: one Steam request per 100 games, alerts grouped into as few
+    Discord messages as possible, and earlier alerts edited when a sale ends or gets cheaper.
+    Returns a summary dict: checked, alerts, failed (bool), reason.
+    """
+    ids = [str(g['app_id']) for g in games]
+    prices, steam_failed = get_prices(ids, settings['country_code'], settings['language'])
+    lows = get_steam_lows(ids, settings.get('itad_api_key'), settings['country_code'])
 
-def check_games(games, settings, mode):
-    """Check every game once (one Steam request per 50 games). Returns how many alerts were sent."""
-    print(f"\033[1;33mFetching prices for {len(games)} game(s) from Steam...\033[0m")
-    prices = get_prices([g['app_id'] for g in games], settings['country_code'], settings['language'])
-    alerts = 0
+    rows, alerts, ended = [], [], []
     for game in games:
-        price_info = prices.get(str(game['app_id']))
+        item_id = str(game['app_id'])
         try:
-            if check_game(game, price_info, settings, mode):
-                alerts += 1
+            row, alert, ended_reminder = _evaluate(game, prices.get(item_id), settings, mode,
+                                                   lows.get(item_id), steam_failed)
         except Exception as e:
             logging.exception(f"Error checking {game['name']}: {e}")
-            print(f"\033[1;31m[ERROR] Could not check '{game['name']}': {e}\033[0m")
-        print("-------------------------------------------------")
-    return alerts
+            row, alert, ended_reminder = (Text("-"), Text(""), Text(f"Error: {e}", style="bad")), None, None
+        rows.append((game, row, alert))
+        if alert:
+            alerts.append(alert)
+        if ended_reminder:
+            ended.append((item_id, ended_reminder))
+
+    sent = send_alerts(alerts, settings) if alerts else 0
+    for alert in alerts:
+        if alert.get('message_id'):
+            previous = alert.get('previous')
+            if previous and previous.get('message_id'):
+                edit_alert(settings, previous['message_id'], previous.get('embed_index'),
+                           f"Now even cheaper: {alert['price']['final_formatted']} - see the newer alert")
+            save_sale_reminder(alert['item_id'], alert['name'], alert['current_price'],
+                               alert['price'].get('discount_percent', 0),
+                               alert['message_id'], alert['embed_index'])
+    for item_id, reminder in ended:
+        if reminder.get('message_id'):
+            edit_alert(settings, reminder['message_id'], reminder.get('embed_index'), "Sale ended")
+        remove_expired_sale(item_id)
+
+    if show:
+        table = ui.table("Game", ("Price", {"no_wrap": True}), ("", {"no_wrap": True}), "Result")
+        for game, (price, badge, result), alert in rows:
+            if alert:
+                if alert.get('message_id'):
+                    label = "Alert sent" + (" · lowest ever" if alert['lowest_ever'] else "")
+                    result = Text(label, style="gold" if alert['lowest_ever'] else "good")
+                else:
+                    result = Text("Alert FAILED - retry next check", style="bad")
+            name = Text(game['name'], style="name")
+            info = prices.get(str(game['app_id'])) or {}
+            if info.get('discount_end'):
+                name.append(f"\nends {format_sale_end(info['discount_end'])}", style="muted")
+            table.add_row(name, price, badge, result)
+        ui.console.print(table)
+
+    failed_alerts = len(alerts) - sent
+    reason = ("Steam could not be reached" if steam_failed else
+              f"{failed_alerts} Discord alert(s) failed" if failed_alerts else "")
+    return {'checked': len(games), 'alerts': sent, 'failed': bool(reason), 'reason': reason}
 
 def check_interval(settings):
     """Seconds between checks: the user's setting (minutes), never faster than every 10 minutes."""
@@ -133,91 +168,59 @@ def check_interval(settings):
 def scan_loop(games, settings, mode):
     """Check the games on a timer until the user presses Ctrl+C."""
     interval = check_interval(settings)
-    clear_screen()
-    print_header("🕵️‍♂️ Scanning in Progress 🕵️‍♂️")
-    names = ", ".join(f"'{g['name']}'" for g in games)
-    print(f"\n\033[1;32mScanning {names} for sales every {interval // 60} minutes...\033[0m")
-    print("Press Ctrl+C to stop scanning and return to the menu.")
-    print("-------------------------------------------------")
+    ui.header("Scanning", f"every {interval // 60} min")
+    ui.note(f"Watching {len(games)} game(s). Press Ctrl+C to stop and go back to the menu.\n")
     try:
         while True:
-            check_games(games, settings, mode)
-            print(f"Sleeping for {interval // 60} minutes before checking again...\n")
+            summary = check_games(games, settings, mode)
+            ui.note(f"{time.strftime('%H:%M')}  Checked {summary['checked']} game(s), "
+                    f"sent {summary['alerts']} alert(s). Next check in {interval // 60} minutes.")
             time.sleep(interval)
     except KeyboardInterrupt:
-        print("\nScanning stopped. Returning to menu...")
+        ui.note("\nScanning stopped.")
 
-def _list_games(games, color="\033[1;36m"):
+def _pick_games(games, prompt):
+    """Show the game list and parse '1,3,5' or 'all'. Returns the chosen games or []."""
+    table = ui.table(("#", {"style": "accent", "justify": "right"}), "Game")
     for index, game in enumerate(games, start=1):
-        print(f"{color}  {index}. {game['name']}\033[0m")
+        table.add_row(str(index), game['name'])
+    ui.console.print(table)
+    answer = ui.ask(prompt)
+    if answer.lower() == "all":
+        return list(games)
+    numbers = [int(n) for n in answer.replace(" ", "").split(",") if n.isdigit()]
+    if not numbers or numbers == [0]:
+        return []
+    if any(n < 1 or n > len(games) for n in numbers):
+        ui.error("Some of those numbers aren't in the list.")
+        ui.pause()
+        return []
+    return [games[n - 1] for n in dict.fromkeys(numbers)]
 
 def scan_for_sales(settings):
-    """Scan a single game for sales in an hourly loop."""
+    """Scan a single game for sales in a loop."""
     games = get_games_with_details()
     if not games:
-        print("\nNo saved games to scan for sales!")
-        input("\nPress Enter to return to the menu...")
+        ui.warn("No saved games yet - add one first.")
+        ui.pause()
         return
-
-    clear_screen()
-    print_header("🎮 Select a Game 🎮")
-    print("\n\033[1;35mSelect a game to scan for sales:\033[0m")
-    _list_games(games)
-    try:
-        choice = int(input("\n\033[1;36mEnter game number to scan (or 0 to cancel): \033[0m"))
-    except ValueError:
-        print("\nPlease enter a valid number.")
-        input("\nPress Enter to return to the menu...")
-        return
-    if choice == 0:
-        return
-    if not 1 <= choice <= len(games):
-        print("\nInvalid choice. Try again.")
-        input("\nPress Enter to return to the menu...")
-        return
-
-    mode = choose_mode()
-    if mode:
-        scan_loop([games[choice - 1]], settings, mode)
+    ui.header("Scan one game")
+    chosen = _pick_games(games, "Game number (0 to cancel): ")[:1]
+    if chosen:
+        mode = choose_mode()
+        if mode:
+            scan_loop(chosen, settings, mode)
 
 def scan_multiple_games(settings):
-    """Scans multiple games for sales in an hourly loop."""
+    """Scan several games for sales in a loop."""
     games = get_games_with_details()
     if not games:
-        print("\nNo saved games to scan for sales!")
-        input("\nPress Enter to return to the menu...")
+        ui.warn("No saved games yet - add one first.")
+        ui.pause()
         return
-
-    # Step 1: Game Selection
-    clear_screen()
-    print_header("🎮 Select Multiple Games 🎮")
-    print("\n\033[1;35mSelect multiple games by their numbers to scan for sales:\033[0m")
-    _list_games(games)
-
-    # Ask the user to input game numbers separated by commas
-    numbers_input = input("\n\033[1;36mEnter game numbers (separated by commas), 'all', or 0 to cancel: \033[0m")
-    if numbers_input.strip().lower() == "all":
-        numbers = list(range(1, len(games) + 1))
-    else:
-        numbers = [int(n.strip()) for n in numbers_input.split(',') if n.strip().isdigit()]
-
-    if not numbers or numbers == [0]:
-        print("\nNo valid game numbers entered. Returning to menu...")
-        input("\nPress Enter to return to the menu...")
-        return
-
-    # Check if the entered game numbers are valid
-    invalid = [n for n in numbers if n < 1 or n > len(games)]
-    if invalid:
-        print(f"\nInvalid game numbers: {', '.join(map(str, invalid))}. Please try again.")
-        input("\nPress Enter to return to the menu...")
-        return
-
-    # Step 2: Scanning Mode Choice
-    mode = choose_mode()
-    if not mode:
-        return
-
-    # Step 3: Start Scanning (duplicates removed, order kept)
-    selected = [games[n - 1] for n in dict.fromkeys(numbers)]
-    scan_loop(selected, settings, mode)
+    ui.header("Scan several games")
+    chosen = _pick_games(games, "Game numbers, e.g. 1,3,5 or 'all' (0 to cancel): ")
+    if chosen:
+        mode = choose_mode()
+        if mode:
+            scan_loop(chosen, settings, mode)

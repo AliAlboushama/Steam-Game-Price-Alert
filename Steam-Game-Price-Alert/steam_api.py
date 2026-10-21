@@ -1,20 +1,50 @@
 """
 Newer Steam store endpoints (no API key needed):
-- IStoreBrowseService/GetItems: prices for up to 50 games in one request, with the sale end date
+- IStoreBrowseService/GetItems: prices for up to 100 items per request, with the sale end date.
+  Works for games ("1091500"), packages ("sub:469") and bundles ("bundle:232").
 - IWishlistService/GetWishlist: a public Steam wishlist
 - storesearch: find a game by name
+
+Item ids are strings: a plain number is a game/DLC app id, "sub:N" a package, "bundle:N" a bundle.
 """
 import re
 import json
+import time
 import logging
 import requests
-from utils import HEADERS, steam_language, get_price_info
+from utils import HEADERS, steam_language, get_price_info, get_game_details
 
 GET_ITEMS_URL = "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/"
 WISHLIST_URL = "https://api.steampowered.com/IWishlistService/GetWishlist/v1/"
 SEARCH_URL = "https://store.steampowered.com/api/storesearch/"
 ASSET_BASE = "https://shared.akamai.steamstatic.com/store_item_assets/"
-BATCH_SIZE = 50  # the request goes in the URL; 300 ids is too long for Steam
+BATCH_SIZE = 100       # ids go in the URL: 200 works, 300 is too long for Steam
+RETRY_DELAYS = (5, 20)  # seconds to wait before the 2nd and 3rd try of a failed batch
+MISS_CACHE_SECONDS = 24 * 3600
+
+# Item types in GetItems responses
+_TYPE_PREFIX = {0: "", 1: "sub:", 2: "bundle:"}
+_REQUEST_KEY = {"": "appid", "sub:": "packageid", "bundle:": "bundleid"}
+
+# Games Steam couldn't price even with the fallback, so we don't ask again every round
+_missing_until = {}
+
+def split_item_id(item_id):
+    """'bundle:232' -> ('bundle:', 232), '1091500' -> ('', 1091500)."""
+    item_id = str(item_id)
+    for prefix in ("sub:", "bundle:"):
+        if item_id.startswith(prefix):
+            return prefix, int(item_id[len(prefix):])
+    return "", int(item_id)
+
+def store_url(item_id):
+    """Store page link for a game, package or bundle."""
+    prefix, number = split_item_id(item_id)
+    path = {"": "app", "sub:": "sub", "bundle:": "bundle"}[prefix]
+    return f"https://store.steampowered.com/{path}/{number}/"
+
+def is_app(item_id):
+    return str(item_id).isdigit()
 
 def _price_from_store_item(item):
     """Turn one GetItems result into the same price dict the rest of the bot uses."""
@@ -50,46 +80,73 @@ def _price_from_store_item(item):
         'coming_soon': bool((item.get('release') or {}).get('is_coming_soon')),
     }
 
-def get_store_items(app_ids, country_code, language):
-    """
-    Fetch prices for many games at once. Returns {app_id (str): price dict}.
-    Games Steam doesn't return (removed, region-locked) are simply missing from the result.
-    """
-    app_ids = [str(a) for a in dict.fromkeys(app_ids) if str(a).isdigit()]
-    results = {}
-    for start in range(0, len(app_ids), BATCH_SIZE):
-        batch = app_ids[start:start + BATCH_SIZE]
-        request = {
-            "ids": [{"appid": int(a)} for a in batch],
-            "context": {"language": steam_language(language), "country_code": country_code},
-            "data_request": {"include_all_purchase_options": True, "include_assets": True,
-                             "include_reviews": True, "include_release": True},
-        }
+def _fetch_batch(batch, country_code, language):
+    """One GetItems request, tried up to 3 times with a pause. Returns the items, or None if Steam failed."""
+    request = {
+        "ids": [{_REQUEST_KEY[split_item_id(i)[0]]: split_item_id(i)[1]} for i in batch],
+        "context": {"language": steam_language(language), "country_code": country_code},
+        "data_request": {"include_all_purchase_options": True, "include_assets": True,
+                         "include_reviews": True, "include_release": True},
+    }
+    for attempt, delay in enumerate((0,) + RETRY_DELAYS):
+        if delay:
+            logging.warning(f"GetItems failed, retrying in {delay}s (try {attempt + 1})")
+            time.sleep(delay)
         try:
             response = requests.get(GET_ITEMS_URL, params={"input_json": json.dumps(request)},
                                     headers=HEADERS, timeout=15)
             response.raise_for_status()
-            for item in response.json().get('response', {}).get('store_items', []):
-                if item.get('success') == 1 and item.get('appid'):
-                    results[str(item['appid'])] = _price_from_store_item(item)
+            return response.json().get('response', {}).get('store_items', [])
         except Exception as e:
-            logging.error(f"GetItems failed for {len(batch)} games: {e}")
-    return results
+            logging.error(f"GetItems failed for {len(batch)} items: {e}")
+    return None
 
-def get_prices(app_ids, country_code, language):
+def get_store_items(item_ids, country_code, language):
     """
-    Prices for many games: one GetItems request per 50 games, and the older
-    appdetails endpoint for any game GetItems couldn't answer.
+    Fetch prices for many items at once.
+    Returns (prices, failed): prices = {item_id: price dict}; failed = True if Steam
+    couldn't be reached for at least one batch even after retries.
     """
-    prices = get_store_items(app_ids, country_code, language)
-    for app_id in app_ids:
-        app_id = str(app_id)
-        if app_id not in prices:
-            logging.info(f"GetItems had no data for {app_id}, falling back to appdetails")
-            info = get_price_info(app_id, country_code, language)
-            if info:
-                prices[app_id] = info
-    return prices
+    item_ids = [str(i) for i in dict.fromkeys(item_ids) if re.fullmatch(r'(sub:|bundle:)?\d+', str(i))]
+    results, failed = {}, False
+    for start in range(0, len(item_ids), BATCH_SIZE):
+        items = _fetch_batch(item_ids[start:start + BATCH_SIZE], country_code, language)
+        if items is None:
+            failed = True
+            continue
+        for item in items:
+            if item.get('success') == 1 and item.get('id') is not None:
+                key = _TYPE_PREFIX.get(item.get('item_type', 0), "") + str(item['id'])
+                results[key] = _price_from_store_item(item)
+    return results, failed
+
+def get_prices(item_ids, country_code, language):
+    """
+    Prices for many items: one GetItems request per 100 items. Games that GetItems didn't
+    answer (while Steam itself was fine) get one try on the older appdetails endpoint;
+    misses are remembered for a day so a broken id doesn't cost a request every round.
+    Returns (prices, failed) like get_store_items.
+    """
+    prices, failed = get_store_items(item_ids, country_code, language)
+    if failed:
+        # Steam is having trouble: don't hammer it with one request per game
+        return prices, True
+    now = time.time()
+    for item_id in map(str, item_ids):
+        if item_id in prices or not is_app(item_id) or _missing_until.get(item_id, 0) > now:
+            continue
+        logging.info(f"GetItems had no data for {item_id}, falling back to appdetails")
+        info = get_price_info(item_id, country_code, language)
+        if info:
+            prices[item_id] = info
+        else:
+            _missing_until[item_id] = now + MISS_CACHE_SECONDS
+    return prices, False
+
+def get_dlc(app_id):
+    """App ids of a game's DLC (empty list if none)."""
+    data = get_game_details(app_id, "US", "en")
+    return [str(d) for d in (data or {}).get('dlc') or []]
 
 def search_games(term, country_code="US", language="en", limit=8):
     """Search the Steam store by name. Returns a list of (app_id, name)."""
