@@ -1,4 +1,7 @@
+import sys
 import logging
+import argparse
+import background
 from paths import data_path
 from saved_info import load_user_info, save_user_info
 from utils import (
@@ -472,7 +475,8 @@ def settings_menu(settings):
         print(f"\033[1;36m Webhook:\033[0m {masked}")
         print(f"\033[1;36m Bot name:\033[0m {settings['bot_name'] or '(Discord default)'}    "
               f"\033[1;36mAvatar:\033[0m {settings['bot_avatar'] or '(Discord default)'}")
-        print(f"\033[1;36m Check every:\033[0m {settings.get('check_interval_minutes', 60)} minutes\n")
+        print(f"\033[1;36m Check every:\033[0m {settings.get('check_interval_minutes', 60)} minutes    "
+              f"\033[1;36mAuto-add wishlist games:\033[0m {'ON' if settings.get('wishlist_sync') else 'OFF'}\n")
         print_option("1. Change country")
         print_option("2. Change language")
         print_option("3. Change Discord webhook")
@@ -480,8 +484,9 @@ def settings_menu(settings):
         print_option("5. Change bot avatar")
         print_option("6. Change how often to check")
         print_option("7. Send a test notification")
+        print_option("8. Auto-add new wishlist games in background mode (ON/OFF)")
         print_option("0. Back")
-        choice = get_user_input("\033[1;36mEnter a number (0-7): \033[0m")
+        choice = get_user_input("\033[1;36mEnter a number (0-8): \033[0m")
         if choice == "0":
             return
         if choice == "1":
@@ -516,13 +521,28 @@ def settings_menu(settings):
             send_test_notification(settings)
             input("\nPress Enter to continue...")
             continue
+        elif choice == "8":
+            if not settings.get('wishlist_profile'):
+                print("\033[1;33mImport your wishlist once first (main menu option 8).\033[0m")
+                input("Press Enter to continue...")
+                continue
+            settings['wishlist_sync'] = not settings.get('wishlist_sync')
+            print(f"Auto-add wishlist games is now {'ON' if settings['wishlist_sync'] else 'OFF'}.")
         else:
             print("\033[1;31mInvalid option.\033[0m")
         save_settings(settings)
         input("Press Enter to continue...")
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Steam Game Price Alert - Discord alerts for Steam sales.")
+    parser.add_argument("--daemon", "--background", action="store_true",
+                        help="check all saved games on a timer, without the menu (for servers / startup)")
+    parser.add_argument("--once", action="store_true",
+                        help="check all saved games once and exit (for cron / Task Scheduler)")
+    args = parser.parse_args()
     setup_logging()
+    if args.daemon or args.once:
+        sys.exit(background.run(once=args.once))
     try:
         main_menu()
     except KeyboardInterrupt:
