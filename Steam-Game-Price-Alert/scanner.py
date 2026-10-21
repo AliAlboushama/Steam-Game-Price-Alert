@@ -10,6 +10,7 @@ SLEEP_TIME = 3600  # 1 hour
 
 MODE_TARGET = "1"  # notify when price drops to the user's threshold
 MODE_SALE = "2"    # notify for any discount
+MODE_AUTO = "auto"  # background mode: price target if the game has one, otherwise any discount
 
 def choose_mode():
     """Ask which scanning mode to use. Returns MODE_TARGET, MODE_SALE or None."""
@@ -61,6 +62,8 @@ def check_game(game, price_info, settings, mode):
         print(f"\033[1;33m⭐ LOWEST PRICE EVER! ⭐\033[0m")
 
     threshold = game.get('threshold')
+    if mode == MODE_AUTO:
+        mode = MODE_TARGET if threshold is not None else MODE_SALE
     if mode == MODE_TARGET:
         if threshold is None:
             print("\033[1;33mNo price target set for this game (use 'Set price threshold').\033[0m")
@@ -106,17 +109,20 @@ def check_game(game, price_info, settings, mode):
     return sent
 
 def check_games(games, settings, mode):
-    """Check every game once (one Steam request per 50 games)."""
+    """Check every game once (one Steam request per 50 games). Returns how many alerts were sent."""
     print(f"\033[1;33mFetching prices for {len(games)} game(s) from Steam...\033[0m")
     prices = get_prices([g['app_id'] for g in games], settings['country_code'], settings['language'])
+    alerts = 0
     for game in games:
         price_info = prices.get(str(game['app_id']))
         try:
-            check_game(game, price_info, settings, mode)
+            if check_game(game, price_info, settings, mode):
+                alerts += 1
         except Exception as e:
             logging.exception(f"Error checking {game['name']}: {e}")
             print(f"\033[1;31m[ERROR] Could not check '{game['name']}': {e}\033[0m")
         print("-------------------------------------------------")
+    return alerts
 
 def check_interval(settings):
     """Seconds between checks: the user's setting (minutes), never faster than every 10 minutes."""
